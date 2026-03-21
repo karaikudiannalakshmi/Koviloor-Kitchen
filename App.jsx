@@ -157,7 +157,7 @@ const css = {
   th:{background:P.nav,color:"#F5DEB3",padding:"8px 10px",textAlign:"left",fontSize:11,fontWeight:600,whiteSpace:"nowrap"},
   td:{padding:"8px 10px",borderBottom:`1px solid ${P.highlight}`,color:P.deepBrown,verticalAlign:"middle"},
   btn:(v="primary",sm)=>({
-    padding:sm?"4px 10px":"7px 14px",borderRadius:7,border:"none",cursor:"pointer",
+    padding:sm?"4px 10px":"7px 14px",borderRadius:7,cursor:"pointer",
     fontSize:sm?11:12,fontWeight:600,
     background:v==="primary"?P.saffron:v==="danger"?P.danger:v==="success"?P.success:v==="info"?P.info:v==="ghost"?"transparent":"#F0E6D3",
     color:["primary","danger","success","info"].includes(v)?P.white:P.deepBrown,
