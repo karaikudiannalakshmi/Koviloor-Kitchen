@@ -1,25 +1,18 @@
 // ── Firebase configuration ────────────────────────────────────────────────────
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
+// Replace the values below with YOUR project's config from Firebase Console
+// Firebase Console → Project Settings → Your apps → Web app → Config
 
-// Your web app's Firebase configuration
+import { initializeApp } from "firebase/app";
+import { getFirestore } from "firebase/firestore";
+
 const firebaseConfig = {
-  apiKey: "AIzaSyDSe4Kw3lb3qBfFn4K0xivxY7Cja_uXtSE",
-  authDomain: "koviloor-kitchen.firebaseapp.com",
-  projectId: "koviloor-kitchen",
-  storageBucket: "koviloor-kitchen.firebasestorage.app",
-  messagingSenderId: "1030034988110",
-  appId: "1:1030034988110:web:30ca96f7484cb2059cb71f"
+  apiKey:            "REPLACE_API_KEY",
+  authDomain:        "REPLACE_AUTH_DOMAIN",
+  projectId:         "REPLACE_PROJECT_ID",
+  storageBucket:     "REPLACE_STORAGE_BUCKET",
+  messagingSenderId: "REPLACE_MESSAGING_SENDER_ID",
+  appId:             "REPLACE_APP_ID"
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
-// ── Collection / document names ───────────────────────────────────────────────
-// All app data lives in a single Firestore document for simplicity
-// Path: koviloor/kitchen
-export const KITCHEN_DOC = "kitchen";
-export const KITCHEN_COL = "koviloor";
-
-export { doc, getDoc, setDoc, onSnapshot, collection };
+export const db = getFirestore(app);

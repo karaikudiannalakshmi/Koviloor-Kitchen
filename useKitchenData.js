@@ -4,7 +4,11 @@
 // is loaded from Firestore on mount and saved back on every change.
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { db, doc, setDoc, onSnapshot, KITCHEN_DOC, KITCHEN_COL } from "./firebase.js";
+import { db } from "./firebase.js";
+import { doc, setDoc, onSnapshot } from "firebase/firestore";
+
+const KITCHEN_COL = "koviloor";
+const KITCHEN_DOC = "kitchen";
 
 // ── Seed data (used only when Firestore document doesn't exist yet) ───────────
 import { ING0, REC0, LOC0, RTYPE_SEED, INV0 } from "./seeds.js";
