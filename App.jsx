@@ -596,38 +596,34 @@ function IngsPage({ctx}){
     reader.onload=ev=>{
       const wb=XLSX.read(ev.target.result,{type:"binary"});
       const ws=wb.Sheets[wb.SheetNames[0]];
-      // Skip row 1 (instructions banner) if present — start from first row with "name" header
+      // Row 1 must be headers (simple keys: name,nameTamil,category,unit,normCost,...)
       const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+      const valid=rows.filter(r=>(r.name+"").trim());
+      if(!valid.length){alert("No valid rows found. Make sure row 1 contains column headers (name, category, unit, normCost...)");return;}
+      let nextId=Date.now();
+      const imported=valid.map(r=>({
+        id:nextId++,
+        name:(r.name+"").trim(),
+        nameTamil:(r.nameTamil+"").trim(),
+        category:((r.category||"grocery")+"").toLowerCase().trim()||"grocery",
+        unit:((r.unit||"kg")+"").trim()||"kg",
+        normCost:r.normCost?+r.normCost:0,
+        ...(r.scalingFactor?{scalingFactor:+r.scalingFactor}:{}),
+        ...(r.scalingBenchmark?{scalingBenchmark:+r.scalingBenchmark}:{}),
+        ...(r.cutYield?{cutYield:+r.cutYield}:{}),
+        ...(r.cutUnit?{cutUnit:(r.cutUnit+"").trim()}:{}),
+      }));
+      // Merge: update by name, add new
       setIngredients(prev=>{
-        const byName=Object.fromEntries(prev.map(x=>[x.name.toLowerCase(),x]));
-        let nextId=Math.max(0,...prev.map(x=>x.id||0))+1;
-        const updated=[...prev];
-        rows.forEach(r=>{
-          const name=(r.name||r.Name||"").trim();
-          if(!name)return;
-          const obj={
-            name,
-            nameTamil:(r.nameTamil||r.Tamil||"").trim(),
-            category:((r.category||r.Category||"grocery")+"").toLowerCase().trim()||"grocery",
-            unit:(r.unit||r.Unit||"kg").trim()||"kg",
-            normCost:r.normCost||r.NormCost||r["Price ₹/unit"]?+(r.normCost||r.NormCost||r["Price ₹/unit"]):0,
-            ...(r.scalingFactor||r.ScalingFactor?{scalingFactor:+( r.scalingFactor||r.ScalingFactor)}:{}),
-            ...(r.scalingBenchmark||r.ScalingBenchmark?{scalingBenchmark:+(r.scalingBenchmark||r.ScalingBenchmark)}:{}),
-            ...(r.cutYield||r["Cut Yield\n(0–1)"]?{cutYield:+(r.cutYield||r["Cut Yield\n(0–1)"])}:{}),
-            ...(r.cutUnit?{cutUnit:r.cutUnit}:{}),
-          };
-          const existing=byName[name.toLowerCase()];
-          if(existing){
-            // Update existing by name
-            const idx=updated.findIndex(x=>x.id===existing.id);
-            updated[idx]={...existing,...obj,id:existing.id};
-          } else {
-            updated.push({...obj,id:nextId++});
-            byName[name.toLowerCase()]={id:nextId-1};
-          }
+        const map=new Map(prev.map(x=>[x.name.toLowerCase(),x]));
+        imported.forEach(r=>{
+          const key=r.name.toLowerCase();
+          if(map.has(key)){const ex=map.get(key);map.set(key,{...ex,...r,id:ex.id});}
+          else{map.set(key,r);}
         });
-        return updated;
+        return Array.from(map.values());
       });
+      alert(imported.length+" ingredients imported.");
     };
     reader.readAsBinaryString(file);
     e.target.value="";
