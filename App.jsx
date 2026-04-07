@@ -495,40 +495,23 @@ function IngsPage({ctx}){
   const translateToTamil=async()=>{
     const needTranslation=ingredients.filter(x=>!x.nameTamil||!x.nameTamil.trim());
     if(!needTranslation.length){alert("All ingredients already have Tamil names.");return;}
-    if(!confirm(`Translate ${needTranslation.length} ingredient names to Tamil using AI? This may take a minute.`))return;
+    if(!confirm("Translate "+needTranslation.length+" ingredient names to Tamil using AI? This may take a minute."))return;
     setTranslating(true);
     const BATCH=40;
     const results={};
-    for(let i=0;i<needTranslation.length;i+=BATCH){
-      const batch=needTranslation.slice(i,i+BATCH);
-      setTransProgress(`Translating ${i+1}–${Math.min(i+BATCH,needTranslation.length)} of ${needTranslation.length}...`);
+    for(let bi=0;bi<needTranslation.length;bi+=BATCH){
+      const batch=needTranslation.slice(bi,bi+BATCH);
+      setTransProgress("Translating "+(bi+1)+"–"+Math.min(bi+BATCH,needTranslation.length)+" of "+needTranslation.length+"...");
       try{
-        const prompt=`You are translating kitchen ingredient names from English to Tamil for a temple/free food kitchen in Tamil Nadu.
-Translate each ingredient name below to its Tamil name as used in Tamil cooking.
-Use common everyday Tamil terms (not formal/classical Tamil).
-If it is a brand name or has no Tamil equivalent, keep the English name.
-Return ONLY a valid JSON object mapping each English name to its Tamil translation. No explanation, no markdown.
-
-Ingredients:
-${batch.map(x=>x.name).join('
-')}`;
-        const res=await fetch("https://api.anthropic.com/v1/messages",{
+        const res=await fetch("/api/translate",{
           method:"POST",
           headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({
-            model:"claude-sonnet-4-20250514",
-            max_tokens:1000,
-            messages:[{role:"user",content:prompt}]
-          })
+          body:JSON.stringify({names:batch.map(x=>x.name)})
         });
         const data=await res.json();
-        const text=data.content?.[0]?.text||"{}";
-        const clean=text.replace(/```json|```/g,"").trim();
-        const parsed=JSON.parse(clean);
-        Object.assign(results,parsed);
+        if(data.translations)Object.assign(results,data.translations);
       }catch(err){console.error("Translation batch error:",err);}
     }
-    // Apply translations
     setIngredients(prev=>prev.map(ing=>{
       if(ing.nameTamil&&ing.nameTamil.trim())return ing;
       const tamil=results[ing.name];
@@ -536,8 +519,7 @@ ${batch.map(x=>x.name).join('
     }));
     setTranslating(false);
     setTransProgress("");
-    const count=Object.keys(results).length;
-    alert(`Done! Translated ${count} ingredients.`);
+    alert("Done! Translated "+Object.keys(results).length+" ingredients.");
   };
 
   const importXlsx=e=>{
