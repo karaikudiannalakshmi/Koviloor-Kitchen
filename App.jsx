@@ -589,6 +589,56 @@ function IngsPage({ctx}){
   const [ef,setEf]=useState({});
   const [nr,setNr]=useState({name:"",nameTamil:"",category:"grocery",unit:"kg",normCost:"",scalingFactor:"",scalingBenchmark:""});
   const fRef=useRef();
+  const [translating,setTranslating]=useState(false);
+  const [transProgress,setTransProgress]=useState("");
+
+  const translateToTamil=async()=>{
+    const needTranslation=ingredients.filter(x=>!x.nameTamil||!x.nameTamil.trim());
+    if(!needTranslation.length){alert("All ingredients already have Tamil names.");return;}
+    if(!confirm(`Translate ${needTranslation.length} ingredient names to Tamil using AI? This may take a minute.`))return;
+    setTranslating(true);
+    const BATCH=40;
+    const results={};
+    for(let i=0;i<needTranslation.length;i+=BATCH){
+      const batch=needTranslation.slice(i,i+BATCH);
+      setTransProgress(`Translating ${i+1}–${Math.min(i+BATCH,needTranslation.length)} of ${needTranslation.length}...`);
+      try{
+        const prompt=`You are translating kitchen ingredient names from English to Tamil for a temple/free food kitchen in Tamil Nadu.
+Translate each ingredient name below to its Tamil name as used in Tamil cooking.
+Use common everyday Tamil terms (not formal/classical Tamil).
+If it is a brand name or has no Tamil equivalent, keep the English name.
+Return ONLY a valid JSON object mapping each English name to its Tamil translation. No explanation, no markdown.
+
+Ingredients:
+${batch.map(x=>x.name).join('
+')}`;
+        const res=await fetch("https://api.anthropic.com/v1/messages",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            model:"claude-sonnet-4-20250514",
+            max_tokens:1000,
+            messages:[{role:"user",content:prompt}]
+          })
+        });
+        const data=await res.json();
+        const text=data.content?.[0]?.text||"{}";
+        const clean=text.replace(/```json|```/g,"").trim();
+        const parsed=JSON.parse(clean);
+        Object.assign(results,parsed);
+      }catch(err){console.error("Translation batch error:",err);}
+    }
+    // Apply translations
+    setIngredients(prev=>prev.map(ing=>{
+      if(ing.nameTamil&&ing.nameTamil.trim())return ing;
+      const tamil=results[ing.name];
+      return tamil?{...ing,nameTamil:tamil}:ing;
+    }));
+    setTranslating(false);
+    setTransProgress("");
+    const count=Object.keys(results).length;
+    alert(`Done! Translated ${count} ingredients.`);
+  };
 
   const importXlsx=e=>{
     const file=e.target.files[0]; if(!file)return;
@@ -666,6 +716,10 @@ function IngsPage({ctx}){
           <button style={css.btn("ghost",true)} onClick={dlTemplate}>📥 {t("Download Template","டெம்ப்ளேட்")}</button>
           <button style={css.btn("success",true)} onClick={()=>fRef.current.click()}>📤 {t("Import Excel","Excel இறக்கு")}</button>
           <input ref={fRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importXlsx}/>
+          <button style={{...css.btn("ghost",true),borderColor:P.purple,color:translating?P.muted:P.purple}}
+            onClick={translateToTamil} disabled={translating}>
+            {translating?"⏳ "+transProgress:"🔤 "+t("Translate Tamil","தமிழில் மொழிபெயர்")}
+          </button>
         </div>
       </div>
 
