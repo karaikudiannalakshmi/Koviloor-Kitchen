@@ -366,7 +366,7 @@ function App(){
   const [lang,setLang]=useState("en");
   const [modal,setModal]=useState(null);
   const {
-    loaded,saveStatus,
+    loaded,saveStatus,forceSave,
     ingredients,setIngredients,
     recipes,setRecipes,
     orders,setOrders,
@@ -437,12 +437,23 @@ function App(){
               <option value="ta">தமிழ்</option>
             </select>
           </div>
-          {saveStatus==="saving"&&<span style={{fontSize:11,color:"#9B7355",marginLeft:8}}>⏳ Saving...</span>}
-          {saveStatus==="saved"&&<span style={{fontSize:11,color:"#1A7A40",marginLeft:8}}>✓ Saved</span>}
-          {saveStatus==="error"&&<span style={{fontSize:11,color:"#C0392B",marginLeft:8}}>⚠ Save failed</span>}
+          <button
+            disabled={saveStatus==="saving"||saveStatus==="idle"||saveStatus==="saved"}
+            onClick={forceSave}
+            style={{
+              marginLeft:12,padding:"6px 18px",borderRadius:7,
+              border:"none",cursor:saveStatus==="pending"?"pointer":"default",
+              fontWeight:700,fontSize:12,
+              background:saveStatus==="error"?"#C0392B":saveStatus==="saved"?"#1A7A40":saveStatus==="pending"?"#E8821A":"#DCC88A",
+              color:"white",
+              opacity:saveStatus==="idle"||saveStatus==="saved"?0.6:1,
+              transition:"all 0.2s",
+            }}>
+            {saveStatus==="saving"?"⏳ Saving...":saveStatus==="saved"?"✓ Saved":saveStatus==="error"?"⚠ Retry Save":"💾 Save"}
+          </button>
           <button onClick={()=>{sessionStorage.removeItem("kk_auth");window.location.reload();}}
-            style={{marginLeft:12,padding:"4px 10px",borderRadius:6,border:"1px solid #DCC88A",
-              background:"transparent",color:"#9B7355",fontSize:11,cursor:"pointer"}}>
+            style={{marginLeft:8,padding:"6px 12px",borderRadius:7,border:"1px solid #DCC88A",
+              background:"transparent",color:"#9B7355",fontSize:12,cursor:"pointer",fontWeight:600}}>
             🔒 Lock
           </button>
         </div>
@@ -2790,71 +2801,4 @@ function PurchForm({ctx,onClose}){
   );
 }
 
-){
-  const {orders,recipes,ingredients,setInventory,lang}=ctx;
-  const t=(en,ta)=>lang==="en"?en:ta;
-  const entries=orders.filter(o=>!o.isTemplate&&o.date===date).flatMap(o=>o.entries.map(e=>({...e,_order:o})));
-  const rows=computeTotals(entries,recipes,ingredients);
-  const totals={};
-  rows.forEach(r=>{if(!totals[r.d.id])totals[r.d.id]={d:r.d,qty:0,unit:r.unit};totals[r.d.id].qty+=r.qty;});
-  const [edits,setEdits]=useState(Object.fromEntries(Object.values(totals).map(r=>[r.d.id,r.qty.toFixed(2)])));
-
-  const post=()=>{
-    const newIss=Object.values(totals).map(r=>({
-      id:Date.now()+r.d.id,iid:r.d.id,date,
-      qty:+edits[r.d.id],unit:r.unit,
-      note:`Auto from orders ${date}`,
-      adjusted:+edits[r.d.id]!==+r.qty.toFixed(2),
-    }));
-    setInventory(p=>({...p,issues:[...p.issues,...newIss]}));
-    onClose();
-  };
-
-  return(
-    <div>
-      <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:P.deepBrown,marginBottom:6}}>{t("Post Issues to Inventory","சரக்கு வழங்கு")}</div>
-      <div style={{fontSize:12,color:P.muted,marginBottom:14}}>{t("Edit quantities if any taste adjustment is needed before posting.","சுவைக்கேற்ப அளவை திருத்தவும்.")} <strong>{date}</strong></div>
-      {Object.keys(totals).length===0&&<div style={{color:P.muted,textAlign:"center",padding:16}}>{t("No orders found for this date.","ஆர்டர் இல்லை.")}</div>}
-      <table style={css.table}>
-        <thead><tr>
-          <th style={css.th}>{t("Ingredient","பொருள்")}</th>
-          <th style={css.th}>{t("Calculated","கணித்தது")}</th>
-          <th style={css.th}>{t("Qty to Issue","வழங்கும் அளவு")}</th>
-          <th style={css.th}>{t("Norm Cost","நிலையான விலை")}</th>
-          <th style={css.th}>{t("Issue Value","மதிப்பு")}</th>
-        </tr></thead>
-        <tbody>{Object.values(totals).map((r,i)=>{
-          const issueVal=(r.d.normCost||0)*(+edits[r.d.id]||r.qty);
-          return(
-            <tr key={r.d.id} style={{background:i%2===0?P.white:P.highlight}}>
-              <td style={css.td}><strong>{lang==="en"?r.d.name:r.d.nameTamil}</strong></td>
-              <td style={css.td}>{r.qty.toFixed(2)} {r.unit}</td>
-              <td style={css.td}>
-                <div style={{display:"flex",alignItems:"center",gap:4}}>
-                  <input type="number" step="0.01" style={{...css.inp,width:90,borderColor:+edits[r.d.id]!==+r.qty.toFixed(2)?"#F59E0B":"#DCC88A"}} value={edits[r.d.id]} onChange={e=>setEdits(x=>({...x,[r.d.id]:e.target.value}))}/>
-                  <span style={{fontSize:11,color:P.muted}}>{r.unit}</span>
-                  {+edits[r.d.id]!==+r.qty.toFixed(2)&&<span style={css.badge(P.saffron)}>✏️</span>}
-                </div>
-              </td>
-              <td style={css.td}>{r.d.normCost?<span style={{color:P.purple}}>₹{r.d.normCost}/{r.d.unit}</span>:<span style={{color:"#CCC"}}>—</span>}</td>
-              <td style={css.td}>{issueVal>0?<strong style={{color:P.success}}>₹{issueVal.toFixed(2)}</strong>:<span style={{color:"#CCC"}}>—</span>}</td>
-            </tr>
-          );
-        })}</tbody>
-      </table>
-      {(()=>{
-        const totalCost=Object.values(totals).reduce((s,r)=>s+(r.d.normCost||0)*(+edits[r.d.id]||r.qty),0);
-        return totalCost>0?(
-          <div style={{background:P.success+"18",border:`1px solid ${P.success}33`,borderRadius:7,padding:"8px 12px",marginTop:10,fontSize:13,fontWeight:600,color:P.success,textAlign:"right"}}>
-            📐 {t("Total Normative Issue Value","மொத்த நிலையான வழங்கல் மதிப்பு")}: ₹{totalCost.toFixed(2)}
-          </div>
-        ):null;
-      })()}
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
-        <button style={css.btn("ghost")} onClick={onClose}>{t("Cancel","ரத்து")}</button>
-        <button style={css.btn("success")} onClick={post}>📦 {t("Post Issues","வழங்கு")}</button>
-      </div>
-    </div>
-  );
-}
 export default App;
