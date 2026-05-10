@@ -2,6 +2,7 @@ import { useState, useMemo, useRef } from "react";
 import { useKitchenData } from "./useKitchenData.js";
 import { RTYPE_SEED } from "./seeds.js";
 import * as XLSX from "xlsx";
+
 function PostIssues({ctx,date,onClose}){
   const {orders,recipes,ingredients,setInventory,lang}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
@@ -119,7 +120,6 @@ function PostIssues({ctx,date,onClose}){
     </div>
   );
 }
-
 
 const fl = document.createElement("link");
 fl.rel = "stylesheet";
@@ -288,17 +288,6 @@ function effectiveQty(entry, order){
   return entry.qty*(cur/entry.pax);
 }
 
-
-const INV0={
-  purchases:[
-    {id:1,iid:1,date:TODAY,qty:100,unit:"kg",cpu:45,supplier:"Local Market",note:""},
-    {id:2,iid:3,date:TODAY,qty:30,unit:"kg",cpu:110,supplier:"Local Market",note:""},
-    {id:3,iid:18,date:TODAY,qty:10,unit:"kg",cpu:18,supplier:"Local Market",note:""},
-    {id:4,iid:19,date:TODAY,qty:5,unit:"kg",cpu:250,supplier:"Local Market",note:""},
-  ],
-  issues:[],
-};
-
 // ── Expand a recipe's raw ingredients recursively via subLinks ────────────────
 // mainMult = how many times the base recipe is being made
 function expandRecipeIngs(rec, mainMult, recipes, ingredients) {
@@ -361,12 +350,13 @@ function computeTotals(entries, recipes, ingredients, order) {
 // ════════════════════════════════════════════════════════════════════
 // MAIN APP
 // ════════════════════════════════════════════════════════════════════
+export default 
 function App(){
   const [page,setPage]=useState("ingredients");
   const [lang,setLang]=useState("en");
   const [modal,setModal]=useState(null);
   const {
-    loaded,saveStatus,forceSave,
+    loaded,saveStatus,
     ingredients,setIngredients,
     recipes,setRecipes,
     orders,setOrders,
@@ -391,6 +381,7 @@ function App(){
       {id:"rep_cost",en:"Cost Analysis",ta:"செலவு பகுப்பாய்வு"},
     ]},
     {id:"inventory",icon:"📦",en:"Inventory",ta:"சரக்கு மேலாண்மை"},
+    {id:"ai_planner",icon:"🤖",en:"AI Menu Planner",ta:"AI மெனு திட்டம்"},
   ];
   const flat=NAV.flatMap(n=>n.children?[n,...n.children]:[n]);
   const cur=flat.find(p=>p.id===page)||NAV[0];
@@ -437,23 +428,12 @@ function App(){
               <option value="ta">தமிழ்</option>
             </select>
           </div>
-          <button
-            disabled={saveStatus==="saving"||saveStatus==="idle"||saveStatus==="saved"}
-            onClick={forceSave}
-            style={{
-              marginLeft:12,padding:"6px 18px",borderRadius:7,
-              border:"none",cursor:saveStatus==="pending"?"pointer":"default",
-              fontWeight:700,fontSize:12,
-              background:saveStatus==="error"?"#C0392B":saveStatus==="saved"?"#1A7A40":saveStatus==="pending"?"#E8821A":"#DCC88A",
-              color:"white",
-              opacity:saveStatus==="idle"||saveStatus==="saved"?0.6:1,
-              transition:"all 0.2s",
-            }}>
-            {saveStatus==="saving"?"⏳ Saving...":saveStatus==="saved"?"✓ Saved":saveStatus==="error"?"⚠ Retry Save":"💾 Save"}
-          </button>
+          {saveStatus==="saving"&&<span style={{fontSize:11,color:"#9B7355",marginLeft:8}}>⏳ Saving...</span>}
+          {saveStatus==="saved"&&<span style={{fontSize:11,color:"#1A7A40",marginLeft:8}}>✓ Saved</span>}
+          {saveStatus==="error"&&<span style={{fontSize:11,color:"#C0392B",marginLeft:8}}>⚠ Save failed</span>}
           <button onClick={()=>{sessionStorage.removeItem("kk_auth");window.location.reload();}}
-            style={{marginLeft:8,padding:"6px 12px",borderRadius:7,border:"1px solid #DCC88A",
-              background:"transparent",color:"#9B7355",fontSize:12,cursor:"pointer",fontWeight:600}}>
+            style={{marginLeft:12,padding:"4px 10px",borderRadius:6,border:"1px solid #DCC88A",
+              background:"transparent",color:"#9B7355",fontSize:11,cursor:"pointer"}}>
             🔒 Lock
           </button>
         </div>
@@ -468,6 +448,7 @@ function App(){
           {page==="rep_col"&&<RepCol ctx={ctx}/>}
           {page==="rep_cost"&&<RepCost ctx={ctx}/>}
           {page==="inventory"&&<InvPage ctx={ctx}/>}
+          {page==="ai_planner"&&<AiMenuPlanner ctx={ctx}/>}
         </div>
       </main>
 
@@ -500,38 +481,6 @@ function IngsPage({ctx}){
   const [ef,setEf]=useState({});
   const [nr,setNr]=useState({name:"",nameTamil:"",category:"grocery",unit:"kg",normCost:"",scalingFactor:"",scalingBenchmark:""});
   const fRef=useRef();
-  const [translating,setTranslating]=useState(false);
-  const [transProgress,setTransProgress]=useState("");
-
-  const translateToTamil=async()=>{
-    const needTranslation=ingredients.filter(x=>!x.nameTamil||!x.nameTamil.trim());
-    if(!needTranslation.length){alert("All ingredients already have Tamil names.");return;}
-    if(!confirm("Translate "+needTranslation.length+" ingredient names to Tamil using AI? This may take a minute."))return;
-    setTranslating(true);
-    const BATCH=40;
-    const results={};
-    for(let bi=0;bi<needTranslation.length;bi+=BATCH){
-      const batch=needTranslation.slice(bi,bi+BATCH);
-      setTransProgress("Translating "+(bi+1)+"–"+Math.min(bi+BATCH,needTranslation.length)+" of "+needTranslation.length+"...");
-      try{
-        const res=await fetch("/api/translate",{
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({names:batch.map(x=>x.name)})
-        });
-        const data=await res.json();
-        if(data.translations)Object.assign(results,data.translations);
-      }catch(err){console.error("Translation batch error:",err);}
-    }
-    setIngredients(prev=>prev.map(ing=>{
-      if(ing.nameTamil&&ing.nameTamil.trim())return ing;
-      const tamil=results[ing.name];
-      return tamil?{...ing,nameTamil:tamil}:ing;
-    }));
-    setTranslating(false);
-    setTransProgress("");
-    alert("Done! Translated "+Object.keys(results).length+" ingredients.");
-  };
 
   const importXlsx=e=>{
     const file=e.target.files[0]; if(!file)return;
@@ -539,34 +488,16 @@ function IngsPage({ctx}){
     reader.onload=ev=>{
       const wb=XLSX.read(ev.target.result,{type:"binary"});
       const ws=wb.Sheets[wb.SheetNames[0]];
-      // Row 1 must be headers (simple keys: name,nameTamil,category,unit,normCost,...)
-      const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
-      const valid=rows.filter(r=>(r.name+"").trim());
-      if(!valid.length){alert("No valid rows found. Make sure row 1 contains column headers (name, category, unit, normCost...)");return;}
-      let nextId=Date.now();
-      const imported=valid.map(r=>({
-        id:nextId++,
-        name:(r.name+"").trim(),
-        nameTamil:(r.nameTamil+"").trim(),
-        category:((r.category||"grocery")+"").toLowerCase().trim()||"grocery",
-        unit:((r.unit||"kg")+"").trim()||"kg",
-        normCost:r.normCost?+r.normCost:0,
-        ...(r.scalingFactor?{scalingFactor:+r.scalingFactor}:{}),
-        ...(r.scalingBenchmark?{scalingBenchmark:+r.scalingBenchmark}:{}),
-        ...(r.cutYield?{cutYield:+r.cutYield}:{}),
-        ...(r.cutUnit?{cutUnit:(r.cutUnit+"").trim()}:{}),
-      }));
-      // Merge: update by name, add new
-      setIngredients(prev=>{
-        const map=new Map(prev.map(x=>[x.name.toLowerCase(),x]));
-        imported.forEach(r=>{
-          const key=r.name.toLowerCase();
-          if(map.has(key)){const ex=map.get(key);map.set(key,{...ex,...r,id:ex.id});}
-          else{map.set(key,r);}
-        });
-        return Array.from(map.values());
-      });
-      alert(imported.length+" ingredients imported.");
+      const rows=XLSX.utils.sheet_to_json(ws);
+      const imported=rows.map((r,i)=>({
+        id:Date.now()+i,
+        name:r.Name||r.name||"",nameTamil:r.Tamil||r.nameTamil||"",
+        category:(r.Category||r.category||"grocery").toLowerCase(),
+        unit:r.Unit||r.unit||"kg",
+        normCost:r.NormCost?+r.NormCost:undefined,
+        scalingBenchmark:r.ScalingBenchmark?+r.ScalingBenchmark:undefined,
+      })).filter(r=>r.name);
+      setIngredients(p=>[...p,...imported]);
     };
     reader.readAsBinaryString(file);
     e.target.value="";
@@ -609,10 +540,6 @@ function IngsPage({ctx}){
           <button style={css.btn("ghost",true)} onClick={dlTemplate}>📥 {t("Download Template","டெம்ப்ளேட்")}</button>
           <button style={css.btn("success",true)} onClick={()=>fRef.current.click()}>📤 {t("Import Excel","Excel இறக்கு")}</button>
           <input ref={fRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importXlsx}/>
-          <button style={{...css.btn("ghost",true),borderColor:P.purple,color:translating?P.muted:P.purple}}
-            onClick={translateToTamil} disabled={translating}>
-            {translating?"⏳ "+transProgress:"🔤 "+t("Translate Tamil","தமிழில் மொழிபெயர்")}
-          </button>
         </div>
       </div>
 
@@ -710,6 +637,7 @@ function RecsPage({ctx}){
             <th style={css.th}>{t("Recipe Name","சமையல் பெயர்")}</th>
             <th style={css.th}>{t("Type","வகை")}</th>
             <th style={css.th}>{t("Yield","விளைச்சல்")}</th>
+            <th style={css.th}>{t("Main Veg","காய்கறி")}</th>
             <th style={css.th}>{t("Cost/unit","செலவு/அலகு")}</th>
             <th style={css.th}>{t("Ings","பொருட்கள்")}</th>
             <th style={css.th}>{t("Sub-links","துணை")}</th>
@@ -735,6 +663,7 @@ function RecsPage({ctx}){
                   return tp?<span style={css.badge(col)}>{lang==="en"?tp.en:tp.ta}</span>:<span style={css.badge(P.muted)}>{t("—","—")}</span>;
                 })()}</td>
                 <td style={css.td}><strong>{r.yield}</strong> {r.yieldUnit}</td>
+                <td style={css.td}>{r.mainVegetable?<span style={css.badge("#2E7D32")}>{r.mainVegetable}</span>:<span style={{color:"#CCC",fontSize:10}}>—</span>}</td>
                 <td style={css.td}>{(()=>{const cpu=costPerUnit(r,recipes,ingredients);return cpu>0?<span style={{fontWeight:700,color:P.success}}>₹{cpu.toFixed(2)}/{r.yieldUnit}</span>:<span style={{color:"#CCC"}}>—</span>;})()}</td>
                 <td style={{...css.td,textAlign:"center"}}>{r.ingredients.length}</td>
                 <td style={{...css.td,textAlign:"center"}}>{r.subLinks?.length>0?<span style={css.badge(P.info)}>{r.subLinks.length}</span>:<span style={{color:"#CCC"}}>—</span>}</td>
@@ -1088,7 +1017,7 @@ function RecipeTypesManager({ctx,onClose}){
 function RecForm({ctx,rec,onClose}){
   const {ingredients,recipes,setRecipes,recipeTypes,lang,setModal}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
-  const [f,setF]=useState(rec||{name:"",nameTamil:"",recipeType:"other",isSubRecipe:false,yield:10,yieldUnit:"kg",prepSteps:[],ingredients:[],subLinks:[]});
+  const [f,setF]=useState(rec||{name:"",nameTamil:"",recipeType:"other",isSubRecipe:false,yield:10,yieldUnit:"kg",prepSteps:[],ingredients:[],subLinks:[],mainVegetable:"",subType:""});
   const [ni,setNi]=useState({iid:"",qty:"",unit:"kg"});
   const [nsl,setNsl]=useState({subId:"",qty:"",unit:"kg"});
   const [nps,setNps]=useState({type:"soak",desc:"",duration:"",durationUnit:"hours",daysBefore:0});
@@ -1142,6 +1071,31 @@ function RecForm({ctx,rec,onClose}){
             </select>
           </div>
         </div>
+        <div>
+          <label style={css.lbl}>🥦 {t("Main Vegetable","முக்கிய காய்கறி")}</label>
+          <input style={css.inp} placeholder={t("e.g. Brinjal, Drumstick, Mixed","எ.கா. கத்திரிக்காய்")}
+            value={f.mainVegetable||""} onChange={e=>setF({...f,mainVegetable:e.target.value})}/>
+          <div style={{fontSize:10,color:P.muted,marginTop:3}}>{t("Used by AI planner to avoid vegetable repeats","AI திட்டமிடலில் காய்கறி மறுபடியாவதை தவிர்க்க")}</div>
+        </div>
+        {(f.recipeType==="kuzhambu"||f.recipeType==="mandi")&&(
+          <div>
+            <label style={css.lbl}>🏷 {t("Sub-Type","உப வகை")}</label>
+            {f.recipeType==="kuzhambu"?(
+              <select style={css.sel} value={f.subType||""} onChange={e=>setF({...f,subType:e.target.value})}>
+                <option value="">{t("— select —","— தேர்வு —")}</option>
+                <option value="plain">{t("Plain (no vegetable/vathal)","சாதா (காய்/வத்தல் இல்லாத)")}</option>
+                <option value="vegetable">{t("Vegetable Kuzhambu","காய்கறி குழம்பு")}</option>
+                <option value="vathal">{t("Vathal / Fried items","வத்தல் / வறுத்த பொருள்")}</option>
+              </select>
+            ):(
+              <select style={css.sel} value={f.subType||""} onChange={e=>setF({...f,subType:e.target.value})}>
+                <option value="">{t("— select —","— தேர்வு —")}</option>
+                <option value="mandi">{t("Mandi","மண்டி")}</option>
+                <option value="pachadi">{t("Pachadi","பச்சடி")}</option>
+              </select>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── Prep Steps ── */}
@@ -2797,6 +2751,401 @@ function PurchForm({ctx,onClose}){
         <button style={css.btn("ghost")} onClick={onClose}>{t("Cancel","ரத்து")}</button>
         <button style={css.btn()} onClick={save}>💾 {t("Save","சேமி")}</button>
       </div>
+    </div>
+  );
+}
+
+function PostIssues({ctx,date,onClose}){
+  const {orders,recipes,ingredients,setInventory,lang}=ctx;
+  const t=(en,ta)=>lang==="en"?en:ta;
+  const entries=orders.filter(o=>!o.isTemplate&&o.date===date).flatMap(o=>o.entries.map(e=>({...e,_order:o})));
+  const rows=computeTotals(entries,recipes,ingredients);
+  const totals={};
+  rows.forEach(r=>{if(!totals[r.d.id])totals[r.d.id]={d:r.d,qty:0,unit:r.unit};totals[r.d.id].qty+=r.qty;});
+  const [edits,setEdits]=useState(Object.fromEntries(Object.values(totals).map(r=>[r.d.id,r.qty.toFixed(2)])));
+
+  const post=()=>{
+    const newIss=Object.values(totals).map(r=>({
+      id:Date.now()+r.d.id,iid:r.d.id,date,
+      qty:+edits[r.d.id],unit:r.unit,
+      note:`Auto from orders ${date}`,
+      adjusted:+edits[r.d.id]!==+r.qty.toFixed(2),
+    }));
+    setInventory(p=>({...p,issues:[...p.issues,...newIss]}));
+    onClose();
+  };
+
+  return(
+    <div>
+      <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:P.deepBrown,marginBottom:6}}>{t("Post Issues to Inventory","சரக்கு வழங்கு")}</div>
+      <div style={{fontSize:12,color:P.muted,marginBottom:14}}>{t("Edit quantities if any taste adjustment is needed before posting.","சுவைக்கேற்ப அளவை திருத்தவும்.")} <strong>{date}</strong></div>
+      {Object.keys(totals).length===0&&<div style={{color:P.muted,textAlign:"center",padding:16}}>{t("No orders found for this date.","ஆர்டர் இல்லை.")}</div>}
+      <table style={css.table}>
+        <thead><tr>
+          <th style={css.th}>{t("Ingredient","பொருள்")}</th>
+          <th style={css.th}>{t("Calculated","கணித்தது")}</th>
+          <th style={css.th}>{t("Qty to Issue","வழங்கும் அளவு")}</th>
+          <th style={css.th}>{t("Norm Cost","நிலையான விலை")}</th>
+          <th style={css.th}>{t("Issue Value","மதிப்பு")}</th>
+        </tr></thead>
+        <tbody>{Object.values(totals).map((r,i)=>{
+          const issueVal=(r.d.normCost||0)*(+edits[r.d.id]||r.qty);
+          return(
+            <tr key={r.d.id} style={{background:i%2===0?P.white:P.highlight}}>
+              <td style={css.td}><strong>{lang==="en"?r.d.name:r.d.nameTamil}</strong></td>
+              <td style={css.td}>{r.qty.toFixed(2)} {r.unit}</td>
+              <td style={css.td}>
+                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                  <input type="number" step="0.01" style={{...css.inp,width:90,borderColor:+edits[r.d.id]!==+r.qty.toFixed(2)?"#F59E0B":"#DCC88A"}} value={edits[r.d.id]} onChange={e=>setEdits(x=>({...x,[r.d.id]:e.target.value}))}/>
+                  <span style={{fontSize:11,color:P.muted}}>{r.unit}</span>
+                  {+edits[r.d.id]!==+r.qty.toFixed(2)&&<span style={css.badge(P.saffron)}>✏️</span>}
+                </div>
+              </td>
+              <td style={css.td}>{r.d.normCost?<span style={{color:P.purple}}>₹{r.d.normCost}/{r.d.unit}</span>:<span style={{color:"#CCC"}}>—</span>}</td>
+              <td style={css.td}>{issueVal>0?<strong style={{color:P.success}}>₹{issueVal.toFixed(2)}</strong>:<span style={{color:"#CCC"}}>—</span>}</td>
+            </tr>
+          );
+        })}</tbody>
+      </table>
+      {(()=>{
+        const totalCost=Object.values(totals).reduce((s,r)=>s+(r.d.normCost||0)*(+edits[r.d.id]||r.qty),0);
+        return totalCost>0?(
+          <div style={{background:P.success+"18",border:`1px solid ${P.success}33`,borderRadius:7,padding:"8px 12px",marginTop:10,fontSize:13,fontWeight:600,color:P.success,textAlign:"right"}}>
+            📐 {t("Total Normative Issue Value","மொத்த நிலையான வழங்கல் மதிப்பு")}: ₹{totalCost.toFixed(2)}
+          </div>
+        ):null;
+      })()}
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
+        <button style={css.btn("ghost")} onClick={onClose}>{t("Cancel","ரத்து")}</button>
+        <button style={css.btn("success")} onClick={post}>📦 {t("Post Issues","வழங்கு")}</button>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// AI MENU PLANNER
+// ════════════════════════════════════════════════════════════════════
+
+// Fixed weekly pattern slots
+const WEEK_PATTERN=[
+  {day:"Monday",   gravy:"sambar",      side1Type:"mandi",    side1Sub:"mandi",   side2:"vellai_poriyal"},
+  {day:"Tuesday",  gravy:"kuzhambu",    side1Type:"kootu",    side1Sub:"",        side2:"kara_poriyal"},
+  {day:"Wednesday",gravy:"sambar",      side1Type:"mandi",    side1Sub:"pachadi", side2:"vellai_poriyal"},
+  {day:"Thursday", gravy:"kuzhambu",    side1Type:"kootu",    side1Sub:"",        side2:"kara_poriyal"},
+  {day:"Friday",   gravy:"sambar",      side1Type:"mandi",    side1Sub:"mandi",   side2:"vellai_poriyal"},
+  {day:"Saturday", gravy:"kuzhambu",    side1Type:"kootu",    side1Sub:"",        side2:"kara_poriyal"},
+  {day:"Sunday",   gravy:"kuzhambu",    side1Type:"kootu",    side1Sub:"",        side2:"kara_poriyal",special:true},
+];
+// Kuzhambu rotation by occurrence: 1st=plain, 2nd=vegetable, 3rd=vathal, 4th(Sun)=mor
+const KUZ_SUBTYPES=["plain","vegetable","vathal","mor"];
+
+function AiMenuPlanner({ctx}){
+  const {recipes,recipeTypes,orders,setOrders,lang}=ctx;
+  const t=(en,ta)=>lang==="en"?en:ta;
+
+  // ── State ──────────────────────────────────────────────────────────
+  const [weekStart,setWeekStart]=useState(()=>{
+    // Default to next Monday
+    const d=new Date();
+    const day=d.getDay();
+    const diff=day===0?1:8-day;
+    d.setDate(d.getDate()+diff);
+    return d.toISOString().slice(0,10);
+  });
+  const [historyInput,setHistoryInput]=useState("");// comma-sep vegetable:type pairs used last week
+  const [result,setResult]=useState(null);
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState("");
+  const [savedMsg,setSavedMsg]=useState("");
+
+  // ── Build recipe catalogue grouped by type ─────────────────────────
+  const byType=(type,subType)=>recipes
+    .filter(r=>!r.isSubRecipe&&r.recipeType===type&&(!subType||r.subType===subType))
+    .map(r=>({id:r.id,name:r.name,nameTamil:r.nameTamil,mainVegetable:r.mainVegetable||"",subType:r.subType||""}));
+
+  const catalogue={
+    sambar:     byType("sambar"),
+    kuzhambu_plain:   byType("kuzhambu","plain"),
+    kuzhambu_vegetable: byType("kuzhambu","vegetable"),
+    kuzhambu_vathal:  byType("kuzhambu","vathal"),
+    kuzhambu_mor:     byType("kuzhambu","mor"),
+    kootu:      byType("kootu"),
+    kara_poriyal: byType("kara_poriyal"),
+    vellai_poriyal: byType("vellai_poriyal"),
+    mandi:      recipes.filter(r=>!r.isSubRecipe&&r.recipeType==="mandi"&&r.subType==="mandi").map(r=>({id:r.id,name:r.name,mainVegetable:r.mainVegetable||""})),
+    pachadi:    recipes.filter(r=>!r.isSubRecipe&&(r.recipeType==="pachadi"||(r.recipeType==="mandi"&&r.subType==="pachadi"))).map(r=>({id:r.id,name:r.name,mainVegetable:r.mainVegetable||""})),
+    rasam:      byType("rasam"),
+    rice:       byType("rice"),
+  };
+
+  // Count how many recipes exist per slot — warn user if missing
+  const warnings=[];
+  if(!catalogue.sambar.length) warnings.push("No Sambar recipes");
+  if(!catalogue.kuzhambu_plain.length) warnings.push("No Plain Kuzhambu (subType=plain)");
+  if(!catalogue.kuzhambu_vegetable.length) warnings.push("No Vegetable Kuzhambu (subType=vegetable)");
+  if(!catalogue.kuzhambu_vathal.length) warnings.push("No Vathal Kuzhambu (subType=vathal)");
+  if(!catalogue.kootu.length) warnings.push("No Kootu recipes");
+  if(!catalogue.kara_poriyal.length) warnings.push("No Kara Poriyal recipes");
+  if(!catalogue.vellai_poriyal.length) warnings.push("No Vellai Poriyal recipes");
+  if(!catalogue.mandi.length) warnings.push("No Mandi recipes (recipeType=mandi, subType=mandi)");
+  if(!catalogue.pachadi.length) warnings.push("No Pachadi recipes");
+
+  const generate=async()=>{
+    setErr("");setResult(null);setLoading(true);setSavedMsg("");
+
+    const prompt=`You are a weekly lunch menu planner for a Tamil Nadu Hindu mutt free-food kitchen (annadanam).
+
+WEEKLY PATTERN (7 days, Lunch only):
+- Monday:    Sambar + Mandi + Vellai Poriyal + Rice + Rasam
+- Tuesday:   Kuzhambu (PLAIN, no vegetable/vathal) + Kootu + Kara Poriyal + Rice + Rasam
+- Wednesday: Sambar + Pachadi + Vellai Poriyal + Rice + Rasam
+- Thursday:  Kuzhambu (VEGETABLE) + Kootu + Kara Poriyal + Rice + Rasam
+- Friday:    Sambar + Mandi + Vellai Poriyal + Rice + Rasam
+- Saturday:  Kuzhambu (VATHAL/FRIED ITEMS) + Kootu + Kara Poriyal + Rice + Rasam
+- Sunday:    Mor Kuzhambu + Kootu + Kara Poriyal + Rice + Rasam
+
+RULES (strictly follow all):
+1. SAMBAR (Mon/Wed/Fri): Each day must use a DIFFERENT main vegetable. No vegetable can repeat across these 3 days.
+2. KUZHAMBU: Tuesday=plain (no vegetable, pick from plain list), Thursday=vegetable (pick unique vegetable, must NOT be same as any Sambar vegetable this week), Saturday=vathal/fried (pick from vathal list), Sunday=Mor Kuzhambu.
+3. MANDI (Mon/Fri): Must use DIFFERENT vegetables on Monday vs Friday.
+4. PACHADI (Wed): Vegetable must differ from both Mandi days.
+5. KOOTU (Tue/Thu/Sat/Sun): All 4 days must use DIFFERENT main vegetables. The Kootu vegetable on a given day must NOT match the Kara Poriyal vegetable on the same day.
+6. KARA PORIYAL (Tue/Thu/Sat/Sun): All 4 days must use DIFFERENT main vegetables. Must NOT match Kootu on same day.
+7. VELLAI PORIYAL (Mon/Wed/Fri): All 3 days must use DIFFERENT main vegetables.
+8. RASAM: Ignore vegetable — just pick any rasam. No repeat rule.
+9. RICE: Same rice recipe every day is fine.
+10. Previous week history to AVOID repeating (do not use these vegetable+type combos): ${historyInput||"none provided"}
+
+AVAILABLE RECIPES BY SLOT:
+Sambar options: ${JSON.stringify(catalogue.sambar.map(r=>r.name+" (veg:"+r.mainVegetable+")"))}
+Kuzhambu PLAIN options: ${JSON.stringify(catalogue.kuzhambu_plain.map(r=>r.name))}
+Kuzhambu VEGETABLE options: ${JSON.stringify(catalogue.kuzhambu_vegetable.map(r=>r.name+" (veg:"+r.mainVegetable+")"))}
+Kuzhambu VATHAL options: ${JSON.stringify(catalogue.kuzhambu_vathal.map(r=>r.name))}
+Mor Kuzhambu options: ${JSON.stringify(catalogue.kuzhambu_mor.map(r=>r.name))}
+Kootu options: ${JSON.stringify(catalogue.kootu.map(r=>r.name+" (veg:"+r.mainVegetable+")"))}
+Kara Poriyal options: ${JSON.stringify(catalogue.kara_poriyal.map(r=>r.name+" (veg:"+r.mainVegetable+")"))}
+Vellai Poriyal options: ${JSON.stringify(catalogue.vellai_poriyal.map(r=>r.name+" (veg:"+r.mainVegetable+")"))}
+Mandi options: ${JSON.stringify(catalogue.mandi.map(r=>r.name+" (veg:"+r.mainVegetable+")"))}
+Pachadi options: ${JSON.stringify(catalogue.pachadi.map(r=>r.name+" (veg:"+r.mainVegetable+")"))}
+Rasam options: ${JSON.stringify(catalogue.rasam.map(r=>r.name))}
+Rice options: ${JSON.stringify(catalogue.rice.map(r=>r.name))}
+
+OUTPUT: Return ONLY valid JSON (no markdown, no explanation):
+{
+  "plan": [
+    {
+      "day": "Monday",
+      "slots": {
+        "rice": "<recipe name>",
+        "rasam": "<recipe name>",
+        "gravy": "<recipe name>",
+        "side1": "<recipe name>",
+        "side2": "<recipe name>"
+      },
+      "vegetableNote": "<brief note on vegetable choices>"
+    }
+  ],
+  "weekSummary": "<one sentence about the week's variety>"
+}`;
+
+    try{
+      const res=await fetch("/api/claude",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          prompt,
+          system:"You are a Tamil Nadu annadanam menu planner. Follow all rules strictly. Return only valid JSON.",
+          maxTokens:2000
+        })
+      });
+      const data=await res.json();
+      const text=(data.content?.[0]?.text||data.text||"").replace(/```json|```/g,"").trim();
+      setResult(JSON.parse(text));
+    }catch(e){
+      setErr(t("AI error — check /api/claude proxy: ","பிழை: ")+e.message);
+    }finally{
+      setLoading(false);
+    }
+  };
+
+  // ── Save week plan as 7 Templates ─────────────────────────────────
+  const saveAsTemplates=()=>{
+    if(!result?.plan)return;
+    const startDate=new Date(weekStart);
+    const newTemplates=result.plan.map((day,i)=>{
+      const date=new Date(startDate);
+      date.setDate(startDate.getDate()+i);
+      const dateStr=date.toISOString().slice(0,10);
+      // Build entries — we don't know recipe IDs here (AI returns names), match by name
+      const slots=day.slots||{};
+      const entries=Object.entries(slots).map(([slot,recipeName])=>{
+        const rec=recipes.find(r=>r.name===recipeName||r.nameTamil===recipeName);
+        if(!rec)return null;
+        return{locId:0,session:"Lunch",recId:rec.id,qty:0,baseQty:0,basePax:null,yu:rec.yieldUnit,slotLabel:slot};
+      }).filter(Boolean);
+      return{
+        id:Date.now()+i,
+        isTemplate:true,
+        name:`${day.day} Lunch — Week of ${weekStart}`,
+        date:dateStr,
+        entries,
+        weekPlan:day,
+      };
+    });
+    setOrders(p=>[...p,...newTemplates]);
+    setSavedMsg(t(`${newTemplates.length} day templates saved! Go to Orders to set quantities and create orders.`,`${newTemplates.length} மாதிரிகள் சேமிக்கப்பட்டன! ஆர்டர்களுக்கு செல்லவும்.`));
+  };
+
+  const SLOT_LABELS={rice:"🍚 Rice",rasam:"🌶 Rasam",gravy:"🍛 Gravy",side1:"🥗 Side 1",side2:"🥦 Side 2"};
+  const DAY_COLORS={Monday:"#E8821A",Tuesday:"#1A7A40",Wednesday:"#6B3FA0",Thursday:"#1A6B8A",Friday:"#C9960C",Saturday:"#C0392B",Sunday:"#2E7D32"};
+
+  return(
+    <div>
+      {/* ── Header card ── */}
+      <div style={{...css.card,background:"linear-gradient(135deg,#FEF6E8,#FFF0D4)",marginBottom:14}}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,color:P.deepBrown,marginBottom:6}}>
+          🤖 {t("AI Weekly Menu Planner","AI வாரம் மெனு திட்டம்")}
+        </div>
+        <div style={{fontSize:12,color:P.muted,marginBottom:14}}>
+          {t("Claude plans a full week of lunches following your kitchen's rotation rules and vegetable variety constraints.","Claude உங்கள் சமையலறையின் சுழற்சி விதிகளை பின்பற்றி ஒரு வாரம் மதிய உணவு திட்டமிடுகிறது.")}
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+          <div>
+            <label style={css.lbl}>📅 {t("Week starting (Monday)","வாரம் தொடக்கம்")}</label>
+            <input type="date" style={css.inp} value={weekStart} onChange={e=>setWeekStart(e.target.value)}/>
+          </div>
+          <div>
+            <label style={css.lbl}>📜 {t("Last week's vegetables used (optional)","கடந்த வாரம் பயன்படுத்திய காய்கறிகள்")}</label>
+            <input style={css.inp} value={historyInput}
+              placeholder={t("e.g. Brinjal-sambar, Drumstick-kootu, Beans-poriyal","எ.கா. கத்திரி-சாம்பார்")}
+              onChange={e=>setHistoryInput(e.target.value)}/>
+            <div style={{fontSize:10,color:P.muted,marginTop:2}}>{t("Helps AI avoid repeating last week's vegetables","கடந்த வாரம் தவிர்க்க")}</div>
+          </div>
+        </div>
+
+        {/* ── Warnings about missing recipe types ── */}
+        {warnings.length>0&&(
+          <div style={{background:"#FEF3C7",border:"1px solid #F59E0B",borderRadius:7,padding:"8px 12px",marginBottom:12,fontSize:11}}>
+            ⚠️ <strong>{t("Missing recipe types — add these recipes first:","இல்லாத வகைகள் — முதலில் சேர்க்கவும்:")}</strong>
+            <ul style={{margin:"4px 0 0 16px",padding:0}}>
+              {warnings.map((w,i)=><li key={i} style={{color:"#92400E"}}>{w}</li>)}
+            </ul>
+          </div>
+        )}
+
+        {err&&<div style={{color:P.danger,fontSize:12,marginBottom:8,padding:"6px 10px",background:"#FEE2E2",borderRadius:6}}>⚠ {err}</div>}
+
+        <button style={{...css.btn(),padding:"9px 20px",fontSize:13,width:"100%"}} onClick={generate} disabled={loading}>
+          {loading
+            ?"⏳ "+t("AI is planning your week...","AI வாரம் திட்டமிடுகிறது...")
+            :"✨ "+t("Generate Weekly Menu","வார மெனு உருவாக்கு")}
+        </button>
+      </div>
+
+      {/* ── Pattern reference card ── */}
+      <div style={{...css.card,marginBottom:14}}>
+        <div style={{...css.sHead,marginBottom:8}}>📋 {t("Weekly Pattern Reference","வார மாதிரி")}</div>
+        <table style={css.table}>
+          <thead><tr>
+            <th style={css.th}>{t("Day","நாள்")}</th>
+            <th style={css.th}>{t("Gravy","குழம்பு")}</th>
+            <th style={css.th}>{t("Side 1","பக்க 1")}</th>
+            <th style={css.th}>{t("Side 2","பக்க 2")}</th>
+          </tr></thead>
+          <tbody>
+            {[
+              {day:"Monday",   gravy:"Sambar",              side1:"Mandi",         side2:"Vellai Poriyal"},
+              {day:"Tuesday",  gravy:"Kuzhambu (Plain)",    side1:"Kootu",         side2:"Kara Poriyal"},
+              {day:"Wednesday",gravy:"Sambar",              side1:"Pachadi",       side2:"Vellai Poriyal"},
+              {day:"Thursday", gravy:"Kuzhambu (Vegetable)",side1:"Kootu",         side2:"Kara Poriyal"},
+              {day:"Friday",   gravy:"Sambar",              side1:"Mandi",         side2:"Vellai Poriyal"},
+              {day:"Saturday", gravy:"Kuzhambu (Vathal)",   side1:"Kootu",         side2:"Kara Poriyal"},
+              {day:"Sunday",   gravy:"Mor Kuzhambu",        side1:"Kootu",         side2:"Kara Poriyal"},
+            ].map((row,i)=>(
+              <tr key={i} style={{background:i%2===0?P.white:P.highlight}}>
+                <td style={css.td}><strong style={{color:DAY_COLORS[row.day]||P.deepBrown}}>{row.day}</strong></td>
+                <td style={css.td}>{row.gravy}</td>
+                <td style={css.td}>{row.side1}</td>
+                <td style={css.td}>{row.side2}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{fontSize:11,color:P.muted,marginTop:6}}>
+          + 🍚 Rice + 🌶 Rasam every day
+        </div>
+      </div>
+
+      {/* ── Results ── */}
+      {result&&(
+        <div>
+          <div style={{...css.card,background:"#F0FDF4",border:"1px solid #BBF7D0",marginBottom:14}}>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,color:"#166534",marginBottom:4}}>
+              ✅ {t("Week Plan Generated","வார திட்டம் தயார்")} — {weekStart}
+            </div>
+            {result.weekSummary&&<div style={{fontSize:12,color:"#166534"}}>{result.weekSummary}</div>}
+          </div>
+
+          {(result.plan||[]).map((day,i)=>{
+            const col=DAY_COLORS[day.day]||P.saffron;
+            return(
+              <div key={i} style={{...css.card,marginBottom:10,borderLeft:`4px solid ${col}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                  <div style={{fontFamily:"'Playfair Display',serif",fontSize:14,color:col,fontWeight:700}}>
+                    {day.day}
+                  </div>
+                  {day.vegetableNote&&(
+                    <div style={{fontSize:10,color:P.muted,maxWidth:"55%",textAlign:"right",lineHeight:1.4}}>
+                      💡 {day.vegetableNote}
+                    </div>
+                  )}
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                  {Object.entries(day.slots||{}).map(([slot,recipeName])=>{
+                    const rec=recipes.find(r=>r.name===recipeName||r.nameTamil===recipeName);
+                    const found=!!rec;
+                    return(
+                      <div key={slot} style={{
+                        background:found?P.white:"#FEF3C7",
+                        border:`1px solid ${found?col+"44":"#F59E0B"}`,
+                        borderRadius:8,padding:"6px 12px",minWidth:140,
+                      }}>
+                        <div style={{fontSize:10,color:P.muted,fontWeight:600,marginBottom:2}}>
+                          {SLOT_LABELS[slot]||slot}
+                        </div>
+                        <div style={{fontSize:12,fontWeight:700,color:found?P.deepBrown:"#92400E"}}>
+                          {recipeName}
+                          {!found&&<span style={{fontSize:10,color:"#92400E",display:"block"}}>⚠ not in library</span>}
+                        </div>
+                        {rec?.mainVegetable&&(
+                          <div style={{fontSize:10,color:"#2E7D32",marginTop:2}}>🥦 {rec.mainVegetable}</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+
+          {savedMsg?(
+            <div style={{background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8,padding:"12px 16px",fontSize:13,color:"#166534",fontWeight:600}}>
+              ✅ {savedMsg}
+            </div>
+          ):(
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}>
+              <button style={css.btn("ghost")} onClick={()=>{setResult(null);setSavedMsg("");}}>
+                🔄 {t("Re-generate","மீண்டும்")}
+              </button>
+              <button style={css.btn("success")} onClick={saveAsTemplates}>
+                💾 {t("Save as Order Templates","ஆர்டர் மாதிரியாக சேமி")}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
