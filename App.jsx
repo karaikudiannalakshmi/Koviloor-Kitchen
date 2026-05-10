@@ -483,6 +483,7 @@ function RecsPage({ctx}){
   const [q,setQ]=useState("");
   const [typeF,setTypeF]=useState("all");
   const [importLog,setImportLog]=useState(null);
+  const [overwrite,setOverwrite]=useState(false);
   const colImportRef=useRef();
 
   const importColumnarXlsx=e=>{
@@ -513,11 +514,9 @@ function RecsPage({ctx}){
         else unit="kg";
         return{qty,unit};
       };
-      const existingNames=new Set(recipes.map(r=>r.name.toLowerCase().trim()));
-      const newRecipes=[];const skipped=[];const allUnmatched=new Set();
+      const newRecipes=[];const updated=[];const skipped=[];const allUnmatched=new Set();
       recipeNames.forEach((recName,ci)=>{
         if(!recName)return;
-        if(existingNames.has(recName.toLowerCase().trim())){skipped.push(recName);return;}
         const ings=[];
         for(let ri=1;ri<raw.length;ri++){
           const row=raw[ri];
@@ -529,15 +528,32 @@ function RecsPage({ctx}){
           if(matched)ings.push({iid:matched.id,qty:parsed.qty,unit:parsed.unit});
           else allUnmatched.add(ingName);
         }
-        newRecipes.push({
-          id:Date.now()+Math.floor(Math.random()*100000)+ci,
-          name:recName,nameTamil:"",recipeType:"other",isSubRecipe:false,
-          yield:1,yieldUnit:"kg",prepSteps:[],ingredients:ings,subLinks:[],
-          mainVegetable:"",subType:"",
-        });
+        const existing=recipes.find(r=>r.name.toLowerCase().trim()===recName.toLowerCase().trim());
+        if(existing){
+          if(overwrite){
+            updated.push({...existing,ingredients:ings});
+          } else {
+            skipped.push(recName);
+          }
+        } else {
+          newRecipes.push({
+            id:Date.now()+Math.floor(Math.random()*100000)+ci,
+            name:recName,nameTamil:"",recipeType:"other",isSubRecipe:false,
+            yield:1,yieldUnit:"kg",prepSteps:[],ingredients:ings,subLinks:[],
+            mainVegetable:"",subType:"",
+          });
+        }
       });
-      if(newRecipes.length>0)setRecipes(p=>[...p,...newRecipes]);
-      setImportLog({added:newRecipes.length,skipped:skipped.length,skippedNames:skipped,unmatched:[...allUnmatched]});
+      if(newRecipes.length>0||updated.length>0){
+        setRecipes(p=>{
+          let next=[...p];
+          // apply overwrites
+          updated.forEach(u=>{next=next.map(r=>r.id===u.id?u:r);});
+          // add new
+          return [...next,...newRecipes];
+        });
+      }
+      setImportLog({added:newRecipes.length,updated:updated.length,skipped:skipped.length,unmatched:[...allUnmatched]});
     };
     reader.readAsBinaryString(file);
     e.target.value="";
@@ -576,6 +592,10 @@ function RecsPage({ctx}){
         </label>
         <div style={{marginLeft:"auto",display:"flex",gap:6}}>
           <button style={css.btn("ghost",true)} onClick={dlColumnarTemplate}>📥 {t("Template","மாதிரி")}</button>
+          <label style={{display:"flex",alignItems:"center",gap:4,fontSize:11,cursor:"pointer",color:overwrite?P.danger:P.muted,fontWeight:overwrite?700:400,border:`1px solid ${overwrite?P.danger:"#DCC88A"}`,borderRadius:6,padding:"4px 8px"}}>
+            <input type="checkbox" checked={overwrite} onChange={e=>setOverwrite(e.target.checked)}/>
+            {t("Overwrite","மேலெழுது")}
+          </label>
           <button style={css.btn("success",true)} onClick={()=>colImportRef.current.click()}>📤 {t("Import Recipes","இறக்கு")}</button>
           <input ref={colImportRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importColumnarXlsx}/>
           <button style={css.btn("ghost",true)} onClick={()=>setModal({type:"recipeTypes"})}>⚙️ {t("Manage Types","வகை நிர்வகி")}</button>
@@ -586,7 +606,8 @@ function RecsPage({ctx}){
         <div style={{background:importLog.err?"#FEE2E2":importLog.added>0?"#F0FDF4":"#FEF3C7",border:`1px solid ${importLog.err?P.danger:importLog.added>0?"#BBF7D0":"#F59E0B"}`,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:12}}>
           {importLog.err?<span style={{color:P.danger}}>⚠ {importLog.err}</span>:(
             <div style={{display:"flex",flexWrap:"wrap",gap:16,alignItems:"flex-start"}}>
-              <span style={{color:"#166534",fontWeight:700}}>✅ {importLog.added} {t("recipe(s) imported","சமையல்கள் இறக்கப்பட்டன")}</span>
+              <span style={{color:"#166534",fontWeight:700}}>✅ {importLog.added} {t("recipe(s) added","புதிதாக சேர்க்கப்பட்டன")}</span>
+              {importLog.updated>0&&<span style={{color:P.info,fontWeight:700}}>🔄 {importLog.updated} {t("updated","புதுப்பிக்கப்பட்டன")}</span>}
               {importLog.skipped>0&&<span style={{color:"#92400E"}}>⏭ {importLog.skipped} {t("skipped (already exist)","தவிர்க்கப்பட்டன")}</span>}
               {importLog.unmatched.length>0&&(
                 <div style={{color:P.danger,width:"100%",marginTop:4}}>
