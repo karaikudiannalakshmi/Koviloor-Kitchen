@@ -481,8 +481,80 @@ function RecsPage({ctx}){
   const t=(en,ta)=>lang==="en"?en:ta;
   const [showSub,setShowSub]=useState(false);
   const [q,setQ]=useState("");
-
   const [typeF,setTypeF]=useState("all");
+  const [importLog,setImportLog]=useState(null);
+  const colImportRef=useRef();
+
+  const importColumnarXlsx=e=>{
+    const file=e.target.files[0]; if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const wb=XLSX.read(ev.target.result,{type:"binary"});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
+      if(raw.length<2){setImportLog({err:"Empty sheet"});return;}
+      const headers=raw[0].map(h=>String(h).trim());
+      const recipeNames=headers.slice(2).filter(Boolean);
+      const ingLookup={};
+      ingredients.forEach(ing=>{
+        ingLookup[ing.name.toLowerCase().trim()]=ing;
+        if(ing.nameTamil)ingLookup[ing.nameTamil.trim()]=ing;
+      });
+      const parseQty=cell=>{
+        const s=String(cell).trim();
+        if(!s||s==="-"||s==="")return null;
+        const m=s.match(/([\d.]+)\s*([A-Za-z]*)/);
+        if(!m)return null;
+        const qty=parseFloat(m[1]);
+        if(isNaN(qty)||qty<=0)return null;
+        let unit=(m[2]||"kg").toLowerCase();
+        if(unit==="lt"||unit==="ltr"||unit==="l")unit="L";
+        else if(unit==="g")unit="g";
+        else unit="kg";
+        return{qty,unit};
+      };
+      const existingNames=new Set(recipes.map(r=>r.name.toLowerCase().trim()));
+      const newRecipes=[];const skipped=[];const allUnmatched=new Set();
+      recipeNames.forEach((recName,ci)=>{
+        if(!recName)return;
+        if(existingNames.has(recName.toLowerCase().trim())){skipped.push(recName);return;}
+        const ings=[];
+        for(let ri=1;ri<raw.length;ri++){
+          const row=raw[ri];
+          const ingName=String(row[1]||"").trim();
+          if(!ingName)continue;
+          const parsed=parseQty(row[ci+2]);
+          if(!parsed)continue;
+          const matched=ingLookup[ingName.toLowerCase()]||ingLookup[ingName];
+          if(matched)ings.push({iid:matched.id,qty:parsed.qty,unit:parsed.unit});
+          else allUnmatched.add(ingName);
+        }
+        newRecipes.push({
+          id:Date.now()+Math.floor(Math.random()*100000)+ci,
+          name:recName,nameTamil:"",recipeType:"other",isSubRecipe:false,
+          yield:1,yieldUnit:"kg",prepSteps:[],ingredients:ings,subLinks:[],
+          mainVegetable:"",subType:"",
+        });
+      });
+      if(newRecipes.length>0)setRecipes(p=>[...p,...newRecipes]);
+      setImportLog({added:newRecipes.length,skipped:skipped.length,skippedNames:skipped,unmatched:[...allUnmatched]});
+    };
+    reader.readAsBinaryString(file);
+    e.target.value="";
+  };
+
+  const dlColumnarTemplate=()=>{
+    const ws=XLSX.utils.aoa_to_sheet([
+      ["S.no","Ingredients","Recipe Name 1","Recipe Name 2"],
+      [1,"Chow Chow","0.66 KG","-"],
+      [2,"Dhall - Moong Dal","0.09 KG","0.12 KG"],
+      [3,"Oil - Oil","0.019 LT","0.025 LT"],
+      [4,"Crystal Salt","0.009 KG","0.008 KG"],
+    ]);
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Recipes");
+    XLSX.writeFile(wb,"recipe_import_template.xlsx");
+  };
 
   const vis=recipes
     .filter(r=>showSub||!r.isSubRecipe)
@@ -503,10 +575,30 @@ function RecsPage({ctx}){
           {t("Include Sub-Recipes","துணை காட்டு")}
         </label>
         <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+          <button style={css.btn("ghost",true)} onClick={dlColumnarTemplate}>📥 {t("Template","மாதிரி")}</button>
+          <button style={css.btn("success",true)} onClick={()=>colImportRef.current.click()}>📤 {t("Import Recipes","இறக்கு")}</button>
+          <input ref={colImportRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importColumnarXlsx}/>
           <button style={css.btn("ghost",true)} onClick={()=>setModal({type:"recipeTypes"})}>⚙️ {t("Manage Types","வகை நிர்வகி")}</button>
           <button style={css.btn()} onClick={()=>setModal({type:"recipe"})}>+ {t("Add Recipe","சேர்")}</button>
         </div>
       </div>
+      {importLog&&(
+        <div style={{background:importLog.err?"#FEE2E2":importLog.added>0?"#F0FDF4":"#FEF3C7",border:`1px solid ${importLog.err?P.danger:importLog.added>0?"#BBF7D0":"#F59E0B"}`,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:12}}>
+          {importLog.err?<span style={{color:P.danger}}>⚠ {importLog.err}</span>:(
+            <div style={{display:"flex",flexWrap:"wrap",gap:16,alignItems:"flex-start"}}>
+              <span style={{color:"#166534",fontWeight:700}}>✅ {importLog.added} {t("recipe(s) imported","சமையல்கள் இறக்கப்பட்டன")}</span>
+              {importLog.skipped>0&&<span style={{color:"#92400E"}}>⏭ {importLog.skipped} {t("skipped (already exist)","தவிர்க்கப்பட்டன")}</span>}
+              {importLog.unmatched.length>0&&(
+                <div style={{color:P.danger,width:"100%",marginTop:4}}>
+                  ⚠ {t("Unmatched ingredients (add to master first):","பொருந்தாத பொருட்கள்:")}
+                  <div style={{marginTop:4,fontFamily:"monospace",fontSize:11,background:"#FEE2E2",padding:"4px 8px",borderRadius:4,lineHeight:1.8}}>{importLog.unmatched.join(" · ")}</div>
+                </div>
+              )}
+              <button style={{...css.btn("ghost",true),marginLeft:"auto"}} onClick={()=>setImportLog(null)}>✕</button>
+            </div>
+          )}
+        </div>
+      )}
       <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
         <button style={css.btn(typeF==="all"?"primary":"ghost",true)} onClick={()=>setTypeF("all")}>{t("All Types","அனைத்தும்")}</button>
         {usedTypes.map(tid=>{const tp=recipeTypes.find(x=>x.id===tid);return tp?<button key={tid} style={{...css.btn("ghost",true),borderColor:tp.color||P.muted,color:tp.color||P.muted,fontWeight:typeF===tid?700:400}} onClick={()=>setTypeF(typeF===tid?"all":tid)}>{lang==="en"?tp.en:tp.ta}</button>:null;})}
