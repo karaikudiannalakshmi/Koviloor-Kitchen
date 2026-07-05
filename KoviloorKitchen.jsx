@@ -1,7 +1,3 @@
-import { useState, useMemo, useRef } from "react";
-import { useKitchenData } from "./useKitchenData.js";
-import { RTYPE_SEED } from "./seeds.js";
-import * as XLSX from "xlsx";
 function PostIssues({ctx,date,onClose}){
   const {orders,recipes,ingredients,setInventory,lang}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
@@ -119,7 +115,8 @@ function PostIssues({ctx,date,onClose}){
     </div>
   );
 }
-
+import { useState, useMemo, useRef } from "react";
+import * as XLSX from "xlsx";
 
 const fl = document.createElement("link");
 fl.rel = "stylesheet";
@@ -183,6 +180,26 @@ const TYPE_PALETTE=[
   "#C0392B","#E67E22","#F39C12","#27AE60","#16A085","#2980B9","#8E44AD",
   "#D35400","#1ABC9C","#2ECC71","#3498DB","#9B59B6","#E91E63","#00BCD4",
   "#FF5722","#607D8B","#795548","#4CAF50","#FF9800","#03A9F4",
+];
+const RTYPE_SEED=[
+  {id:"sambar",        en:"Sambar",          ta:"சாம்பார்",       color:P.saffron},
+  {id:"kuzhambu",      en:"Kuzhambu",        ta:"குழம்பு",         color:"#B45309"},
+  {id:"rasam",         en:"Rasam",           ta:"ரசம்",             color:"#92400E"},
+  {id:"kootu",         en:"Kootu",           ta:"கூட்டு",           color:"#065F46"},
+  {id:"vellai_poriyal",en:"Vellai Poriyal",  ta:"வெள்ளை பொரியல்", color:"#2E7D32"},
+  {id:"kara_poriyal",  en:"Kara Poriyal",    ta:"கார பொரியல்",      color:"#C0392B"},
+  {id:"pachadi",       en:"Pachadi",         ta:"பச்சடி",           color:"#1A6B8A"},
+  {id:"mandi",         en:"Mandi / Kolambu", ta:"மண்டி / கொழம்பு", color:"#6B3FA0"},
+  {id:"payasam",       en:"Payasam",         ta:"பாயசம்",           color:P.gold},
+  {id:"piece_sweet",   en:"Piece Sweet",     ta:"பீஸ் இனிப்பு",    color:"#DB2777"},
+  {id:"bulk_sweet",    en:"Bulk Sweet",      ta:"மொத்த இனிப்பு",   color:"#BE185D"},
+  {id:"rice",          en:"Rice / Sadam",    ta:"சாதம்",            color:P.deepBrown},
+  {id:"tiffin",        en:"Tiffin",          ta:"டிஃபின்",          color:"#0EA5E9"},
+  {id:"chutney",       en:"Chutney",         ta:"சட்னி",            color:"#2E7D32"},
+  {id:"salad",         en:"Salad / Raita",   ta:"சாலட் / பச்சடி",  color:"#0D9488"},
+  {id:"gravy",         en:"Gravy / Curry",   ta:"கிரேவி",           color:"#7C3AED"},
+  {id:"sub",           en:"Sub-Recipe/Base", ta:"துணை சமையல்",      color:P.purple},
+  {id:"other",         en:"Other",           ta:"மற்றவை",           color:P.muted},
 ];
 // TYPE_COLOR kept for any legacy references
 const TYPE_COLOR=Object.fromEntries(RTYPE_SEED.map(x=>[x.id,x.color]));
@@ -273,11 +290,93 @@ function ReportBar({onPrint,onExport,lang,setLang,children}){
   );
 }
 
+const ING0=[
+  // ── Grocery ────────────────────────────────────────────────────────
+  {id:1, name:"Raw Rice",         nameTamil:"பச்சை அரிசி",       category:"grocery",  unit:"kg",  normCost:45},
+  {id:2, name:"Urad Dal",         nameTamil:"உளுத்தம் பருப்பு",  category:"grocery",  unit:"kg",  normCost:120},
+  {id:3, name:"Toor Dal",         nameTamil:"துவரம் பருப்பு",    category:"grocery",  unit:"kg",  normCost:110},
+  {id:4, name:"Chana Whole",      nameTamil:"கொண்டைக்கடலை",     category:"grocery",  unit:"kg",  normCost:90},
+  {id:5, name:"Moong Dal",        nameTamil:"பாசிப் பருப்பு",    category:"grocery",  unit:"kg",  normCost:100},
+  {id:6, name:"Broken Rice",      nameTamil:"பொடி அரிசி",        category:"grocery",  unit:"kg",  normCost:32},
+  {id:7, name:"Oil",              nameTamil:"எண்ணெய்",           category:"grocery",  unit:"L",   normCost:120},
+  {id:8, name:"Ghee",             nameTamil:"நெய்",               category:"grocery",  unit:"g",   normCost:0.5},
+  {id:9, name:"Jaggery",          nameTamil:"வெல்லம்",           category:"grocery",  unit:"g",   normCost:0.06},
+  // ── Raw Vegetables (with cutYield = kg cut per kg raw) ─────────────
+  {id:10,name:"Onion",            nameTamil:"வெங்காயம்",          category:"vegetable",unit:"kg",  normCost:40,  cutYield:0.85, cutUnit:"kg"},
+  {id:11,name:"Tomato",           nameTamil:"தக்காளி",           category:"vegetable",unit:"kg",  normCost:30,  cutYield:0.90, cutUnit:"kg"},
+  {id:12,name:"Drumstick",        nameTamil:"முருங்கைக்காய்",    category:"vegetable",unit:"kg",  normCost:60,  cutYield:0.70, cutUnit:"kg"},
+  {id:13,name:"Coconut",          nameTamil:"தேங்காய்",          category:"vegetable",unit:"nos", normCost:25,  cutYield:0.25, cutUnit:"kg"},
+  {id:14,name:"Green Chili",      nameTamil:"பச்சை மிளகாய்",     category:"vegetable",unit:"g",   normCost:0.08,cutYield:0.90, cutUnit:"g"},
+  {id:15,name:"Ginger",           nameTamil:"இஞ்சி",             category:"vegetable",unit:"g",   normCost:0.12,cutYield:0.85, cutUnit:"g"},
+  {id:16,name:"Garlic",           nameTamil:"பூண்டு",             category:"vegetable",unit:"g",   normCost:0.20,cutYield:0.90, cutUnit:"g"},
+  {id:17,name:"Curry Leaves",     nameTamil:"கறிவேப்பிலை",       category:"vegetable",unit:"g",   normCost:0.04,cutYield:0.80, cutUnit:"g"},
+  // ── Spices ─────────────────────────────────────────────────────────
+  {id:18,name:"Salt",             nameTamil:"உப்பு",              category:"spice",    unit:"g",   normCost:0.018, scalingFactor:0.75,scalingBenchmark:200},
+  {id:19,name:"Red Chili Powder", nameTamil:"மிளகாய் தூள்",      category:"spice",    unit:"g",   normCost:0.25,  scalingFactor:0.70,scalingBenchmark:150},
+  {id:20,name:"Coriander Powder", nameTamil:"தனியா தூள்",        category:"spice",    unit:"g",   normCost:0.15,  scalingFactor:0.75,scalingBenchmark:150},
+  {id:21,name:"Tamarind",         nameTamil:"புளி",               category:"spice",    unit:"g",   normCost:0.12,  scalingFactor:0.80,scalingBenchmark:200},
+  {id:22,name:"Mustard Seeds",    nameTamil:"கடுகு",              category:"spice",    unit:"g",   normCost:0.06,  scalingFactor:0.85,scalingBenchmark:100},
+  {id:23,name:"Turmeric",         nameTamil:"மஞ்சள்",            category:"spice",    unit:"g",   normCost:0.20,  scalingFactor:0.80,scalingBenchmark:80},
+  // ── Cut Vegetables (zero cost — derived from raw; used in recipes) ──
+  {id:101,name:"Onion (cut)",     nameTamil:"வெங்காயம் (நறுக்கியது)", category:"cut", unit:"kg",  normCost:0, rawId:10},
+  {id:102,name:"Tomato (cut)",    nameTamil:"தக்காளி (நறுக்கியது)",  category:"cut", unit:"kg",  normCost:0, rawId:11},
+  {id:103,name:"Drumstick (cut)", nameTamil:"முருங்கைக்காய் (நறுக்கியது)",category:"cut",unit:"kg",normCost:0,rawId:12},
+  {id:104,name:"Coconut (grated)",nameTamil:"தேங்காய் (துருவியது)",  category:"cut", unit:"kg",  normCost:0, rawId:13},
+  {id:105,name:"Green Chili (cut)",nameTamil:"பச்சை மிளகாய் (நறுக்கியது)",category:"cut",unit:"g",normCost:0,rawId:14},
+  {id:106,name:"Ginger (paste)",  nameTamil:"இஞ்சி (விழுது)",        category:"cut", unit:"g",   normCost:0, rawId:15},
+  {id:107,name:"Garlic (paste)",  nameTamil:"பூண்டு (விழுது)",        category:"cut", unit:"g",   normCost:0, rawId:16},
+];
 
 // subLinks: [{subId, qty, unit}] — qty of sub-recipe needed per base yield of this recipe
 // prepSteps: [{type, desc, duration, durationUnit, daysBefore}]
 // recipeType: one of RECIPE_TYPES ids
+const REC0=[
+  {id:1,name:"Idli Batter",nameTamil:"இட்லி மாவு",recipeType:"sub",isSubRecipe:true,yield:10,yieldUnit:"kg",
+   prepSteps:[
+     {type:"soak",desc:"Soak rice & urad dal",duration:8,durationUnit:"hours",daysBefore:1},
+     {type:"grind",desc:"Grind to smooth batter",duration:30,durationUnit:"minutes",daysBefore:1},
+     {type:"ferment",desc:"Ferment batter",duration:10,durationUnit:"hours",daysBefore:1},
+   ],
+   ingredients:[{iid:1,qty:3,unit:"kg"},{iid:2,qty:1,unit:"kg"},{iid:18,qty:60,unit:"g"}],subLinks:[]},
+  {id:2,name:"Idli",nameTamil:"இட்லி",recipeType:"tiffin",isSubRecipe:false,yield:100,yieldUnit:"nos",
+   prepSteps:[
+     {type:"steam",desc:"Steam in idli moulds",duration:12,durationUnit:"minutes",daysBefore:0},
+   ],
+   ingredients:[{iid:18,qty:10,unit:"g"}],subLinks:[{subId:1,qty:10,unit:"kg"}]},
+  {id:3,name:"Sambar",nameTamil:"சாம்பார்",recipeType:"sambar",isSubRecipe:false,yield:10,yieldUnit:"kg",
+   prepSteps:[
+     {type:"pressure",desc:"Pressure cook toor dal",duration:15,durationUnit:"minutes",daysBefore:0},
+     {type:"boil",desc:"Boil vegetables with tamarind",duration:20,durationUnit:"minutes",daysBefore:0},
+   ],
+   ingredients:[{iid:3,qty:1.5,unit:"kg"},{iid:102,qty:2,unit:"kg"},{iid:101,qty:0.5,unit:"kg"},{iid:12,qty:1,unit:"kg"},{iid:18,qty:80,unit:"g"},{iid:19,qty:50,unit:"g"},{iid:20,qty:40,unit:"g"},{iid:21,qty:100,unit:"g"},{iid:22,qty:20,unit:"g"},{iid:7,qty:0.1,unit:"L"}],subLinks:[]},
+  {id:4,name:"Pongal",nameTamil:"பொங்கல்",recipeType:"tiffin",isSubRecipe:false,yield:10,yieldUnit:"kg",
+   prepSteps:[
+     {type:"pressure",desc:"Pressure cook rice & moong dal together",duration:20,durationUnit:"minutes",daysBefore:0},
+   ],
+   ingredients:[{iid:6,qty:3,unit:"kg"},{iid:5,qty:1,unit:"kg"},{iid:18,qty:60,unit:"g"},{iid:8,qty:200,unit:"g"},{iid:22,qty:15,unit:"g"},{iid:14,qty:50,unit:"g"},{iid:15,qty:50,unit:"g"}],subLinks:[]},
+  {id:5,name:"Chana Masala",nameTamil:"சனா மசாலா",recipeType:"gravy",isSubRecipe:false,yield:10,yieldUnit:"kg",
+   prepSteps:[
+     {type:"soak",desc:"Soak chana overnight",duration:10,durationUnit:"hours",daysBefore:1},
+     {type:"pressure",desc:"Pressure cook chana",duration:25,durationUnit:"minutes",daysBefore:0},
+   ],
+   ingredients:[{iid:4,qty:3,unit:"kg"},{iid:101,qty:2,unit:"kg"},{iid:102,qty:2,unit:"kg"},{iid:18,qty:80,unit:"g"},{iid:19,qty:60,unit:"g"},{iid:20,qty:50,unit:"g"},{iid:7,qty:0.2,unit:"L"}],subLinks:[]},
+  {id:6,name:"Rice",nameTamil:"சாதம்",recipeType:"rice",isSubRecipe:false,yield:10,yieldUnit:"kg",
+   prepSteps:[
+     {type:"boil",desc:"Cook rice with water 1:2",duration:25,durationUnit:"minutes",daysBefore:0},
+   ],
+   ingredients:[{iid:1,qty:4,unit:"kg"}],subLinks:[]},
+  {id:7,name:"Coconut Chutney",nameTamil:"தேங்காய் சட்னி",recipeType:"chutney",isSubRecipe:false,yield:3,yieldUnit:"kg",
+   prepSteps:[
+     {type:"grind",desc:"Grind coconut with green chili",duration:10,durationUnit:"minutes",daysBefore:0},
+   ],
+   ingredients:[{iid:104,qty:1.25,unit:"kg"},{iid:105,qty:30,unit:"g"},{iid:18,qty:20,unit:"g"},{iid:22,qty:10,unit:"g"},{iid:7,qty:0.05,unit:"L"}],subLinks:[]},
+];
 
+const LOC0=[
+  {id:1,name:"Main Hall",nameTamil:"முக்கிய மண்டபம்"},
+  {id:2,name:"Old Age Home",nameTamil:"முதியோர் இல்லம்"},
+  {id:3,name:"School",nameTamil:"பள்ளி"},
+];
 
 // effectiveQty: scales entry.qty if pax override set. Returns qty to use in all calculations.
 function effectiveQty(entry, order){
@@ -288,6 +387,26 @@ function effectiveQty(entry, order){
   return entry.qty*(cur/entry.pax);
 }
 
+const ORD0=[
+  {id:1,date:TODAY,name:"Today's Order",isTemplate:false,
+   paxScale:{"1_Breakfast":200,"1_Lunch":500,"2_Breakfast":80,"2_Lunch":80,"3_Lunch":120},
+   entries:[
+    {locId:1,session:"Breakfast",recId:2,qty:200,yu:"nos",pax:200},
+    {locId:1,session:"Breakfast",recId:7,qty:2,yu:"kg",pax:200},
+    {locId:1,session:"Lunch",recId:6,qty:15,yu:"kg",pax:500},
+    {locId:1,session:"Lunch",recId:3,qty:8,yu:"kg",pax:500},
+    {locId:2,session:"Breakfast",recId:4,qty:5,yu:"kg",pax:80},
+    {locId:2,session:"Lunch",recId:6,qty:8,yu:"kg",pax:80},
+    {locId:2,session:"Lunch",recId:3,qty:4,yu:"kg",pax:80},
+    {locId:3,session:"Lunch",recId:6,qty:5,yu:"kg",pax:120},
+    {locId:3,session:"Lunch",recId:3,qty:3,yu:"kg",pax:120},
+  ]},
+  {id:2,date:"",name:"Standard Template",isTemplate:true,paxScale:{},entries:[
+    {locId:1,session:"Breakfast",recId:2,qty:200,yu:"nos",pax:200},
+    {locId:1,session:"Lunch",recId:6,qty:15,yu:"kg",pax:500},
+    {locId:1,session:"Dinner",recId:5,qty:10,yu:"kg",pax:500},
+  ]},
+];
 
 const INV0={
   purchases:[
@@ -361,20 +480,17 @@ function computeTotals(entries, recipes, ingredients, order, expandSubs=true) {
 // ════════════════════════════════════════════════════════════════════
 // MAIN APP
 // ════════════════════════════════════════════════════════════════════
+export default 
 function App(){
   const [page,setPage]=useState("ingredients");
   const [lang,setLang]=useState("en");
+  const [ingredients,setIngredients]=useState(ING0);
+  const [recipes,setRecipes]=useState(REC0);
+  const [locations,setLocations]=useState(LOC0);
+  const [orders,setOrders]=useState(ORD0);
+  const [inventory,setInventory]=useState(INV0);
+  const [recipeTypes,setRecipeTypes]=useState(RTYPE_SEED);
   const [modal,setModal]=useState(null);
-  const {
-    loaded,saveStatus,forceSave,
-    ingredients,setIngredients,
-    recipes,setRecipes,
-    orders,setOrders,
-    inventory,setInventory,
-    locations,setLocations,
-    recipeTypes,setRecipeTypes,
-  } = useKitchenData();
-
   const ctx={lang,ingredients,setIngredients,recipes,setRecipes,locations,setLocations,orders,setOrders,inventory,setInventory,recipeTypes,setRecipeTypes,setModal};
   const t=(en,ta)=>lang==="en"?en:ta;
 
@@ -394,14 +510,6 @@ function App(){
   ];
   const flat=NAV.flatMap(n=>n.children?[n,...n.children]:[n]);
   const cur=flat.find(p=>p.id===page)||NAV[0];
-
-  if(!loaded) return(
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#FEF6E8",flexDirection:"column",gap:12}}>
-      <div style={{fontSize:32}}>🍛</div>
-      <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#5C2A0A"}}>Koviloor Kitchen</div>
-      <div style={{fontSize:13,color:"#9B7355"}}>Loading from cloud...</div>
-    </div>
-  );
 
   return (
     <div style={css.app}>
@@ -437,23 +545,6 @@ function App(){
               <option value="ta">தமிழ்</option>
             </select>
           </div>
-          <button
-            disabled={saveStatus==="saving"||saveStatus==="idle"||saveStatus==="saved"}
-            onClick={forceSave}
-            style={{
-              marginLeft:12,padding:"6px 18px",borderRadius:7,border:"none",
-              cursor:saveStatus==="pending"?"pointer":"default",
-              fontWeight:700,fontSize:12,
-              background:saveStatus==="error"?"#C0392B":saveStatus==="saved"?"#1A7A40":saveStatus==="pending"?"#E8821A":"#DCC88A",
-              color:"white",opacity:saveStatus==="idle"||saveStatus==="saved"?0.6:1,transition:"all 0.2s",
-            }}>
-            {saveStatus==="saving"?"⏳ Saving...":saveStatus==="saved"?"✓ Saved":saveStatus==="error"?"⚠ Retry Save":"💾 Save"}
-          </button>
-          <button onClick={()=>{sessionStorage.removeItem("kk_auth");window.location.reload();}}
-            style={{marginLeft:8,padding:"6px 12px",borderRadius:7,border:"1px solid #DCC88A",
-              background:"transparent",color:"#9B7355",fontSize:12,cursor:"pointer",fontWeight:600}}>
-            🔒 Lock
-          </button>
         </div>
         <div style={css.content}>
           {page==="ingredients"&&<IngsPage ctx={ctx}/>}
@@ -504,23 +595,40 @@ function IngsPage({ctx}){
   const translateToTamil=async()=>{
     const needTranslation=ingredients.filter(x=>!x.nameTamil||!x.nameTamil.trim());
     if(!needTranslation.length){alert("All ingredients already have Tamil names.");return;}
-    if(!confirm("Translate "+needTranslation.length+" ingredient names to Tamil using AI? This may take a minute."))return;
+    if(!confirm(`Translate ${needTranslation.length} ingredient names to Tamil using AI? This may take a minute.`))return;
     setTranslating(true);
     const BATCH=40;
     const results={};
-    for(let bi=0;bi<needTranslation.length;bi+=BATCH){
-      const batch=needTranslation.slice(bi,bi+BATCH);
-      setTransProgress("Translating "+(bi+1)+"–"+Math.min(bi+BATCH,needTranslation.length)+" of "+needTranslation.length+"...");
+    for(let i=0;i<needTranslation.length;i+=BATCH){
+      const batch=needTranslation.slice(i,i+BATCH);
+      setTransProgress(`Translating ${i+1}–${Math.min(i+BATCH,needTranslation.length)} of ${needTranslation.length}...`);
       try{
-        const res=await fetch("/api/translate",{
+        const prompt=`You are translating kitchen ingredient names from English to Tamil for a temple/free food kitchen in Tamil Nadu.
+Translate each ingredient name below to its Tamil name as used in Tamil cooking.
+Use common everyday Tamil terms (not formal/classical Tamil).
+If it is a brand name or has no Tamil equivalent, keep the English name.
+Return ONLY a valid JSON object mapping each English name to its Tamil translation. No explanation, no markdown.
+
+Ingredients:
+${batch.map(x=>x.name).join('
+')}`;
+        const res=await fetch("https://api.anthropic.com/v1/messages",{
           method:"POST",
           headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({names:batch.map(x=>x.name)})
+          body:JSON.stringify({
+            model:"claude-sonnet-4-20250514",
+            max_tokens:1000,
+            messages:[{role:"user",content:prompt}]
+          })
         });
         const data=await res.json();
-        if(data.translations)Object.assign(results,data.translations);
+        const text=data.content?.[0]?.text||"{}";
+        const clean=text.replace(/```json|```/g,"").trim();
+        const parsed=JSON.parse(clean);
+        Object.assign(results,parsed);
       }catch(err){console.error("Translation batch error:",err);}
     }
+    // Apply translations
     setIngredients(prev=>prev.map(ing=>{
       if(ing.nameTamil&&ing.nameTamil.trim())return ing;
       const tamil=results[ing.name];
@@ -528,7 +636,8 @@ function IngsPage({ctx}){
     }));
     setTranslating(false);
     setTransProgress("");
-    alert("Done! Translated "+Object.keys(results).length+" ingredients.");
+    const count=Object.keys(results).length;
+    alert(`Done! Translated ${count} ingredients.`);
   };
 
   const importXlsx=e=>{
@@ -2876,4 +2985,71 @@ function PurchForm({ctx,onClose}){
     </div>
   );
 }
-export default App;
+
+function PostIssues({ctx,date,onClose}){
+  const {orders,recipes,ingredients,setInventory,lang}=ctx;
+  const t=(en,ta)=>lang==="en"?en:ta;
+  const entries=orders.filter(o=>!o.isTemplate&&o.date===date).flatMap(o=>o.entries.map(e=>({...e,_order:o})));
+  const rows=computeTotals(entries,recipes,ingredients);
+  const totals={};
+  rows.forEach(r=>{if(!totals[r.d.id])totals[r.d.id]={d:r.d,qty:0,unit:r.unit};totals[r.d.id].qty+=r.qty;});
+  const [edits,setEdits]=useState(Object.fromEntries(Object.values(totals).map(r=>[r.d.id,r.qty.toFixed(2)])));
+
+  const post=()=>{
+    const newIss=Object.values(totals).map(r=>({
+      id:Date.now()+r.d.id,iid:r.d.id,date,
+      qty:+edits[r.d.id],unit:r.unit,
+      note:`Auto from orders ${date}`,
+      adjusted:+edits[r.d.id]!==+r.qty.toFixed(2),
+    }));
+    setInventory(p=>({...p,issues:[...p.issues,...newIss]}));
+    onClose();
+  };
+
+  return(
+    <div>
+      <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:P.deepBrown,marginBottom:6}}>{t("Post Issues to Inventory","சரக்கு வழங்கு")}</div>
+      <div style={{fontSize:12,color:P.muted,marginBottom:14}}>{t("Edit quantities if any taste adjustment is needed before posting.","சுவைக்கேற்ப அளவை திருத்தவும்.")} <strong>{date}</strong></div>
+      {Object.keys(totals).length===0&&<div style={{color:P.muted,textAlign:"center",padding:16}}>{t("No orders found for this date.","ஆர்டர் இல்லை.")}</div>}
+      <table style={css.table}>
+        <thead><tr>
+          <th style={css.th}>{t("Ingredient","பொருள்")}</th>
+          <th style={css.th}>{t("Calculated","கணித்தது")}</th>
+          <th style={css.th}>{t("Qty to Issue","வழங்கும் அளவு")}</th>
+          <th style={css.th}>{t("Norm Cost","நிலையான விலை")}</th>
+          <th style={css.th}>{t("Issue Value","மதிப்பு")}</th>
+        </tr></thead>
+        <tbody>{Object.values(totals).map((r,i)=>{
+          const issueVal=(r.d.normCost||0)*(+edits[r.d.id]||r.qty);
+          return(
+            <tr key={r.d.id} style={{background:i%2===0?P.white:P.highlight}}>
+              <td style={css.td}><strong>{lang==="en"?r.d.name:r.d.nameTamil}</strong></td>
+              <td style={css.td}>{r.qty.toFixed(2)} {r.unit}</td>
+              <td style={css.td}>
+                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                  <input type="number" step="0.01" style={{...css.inp,width:90,borderColor:+edits[r.d.id]!==+r.qty.toFixed(2)?"#F59E0B":"#DCC88A"}} value={edits[r.d.id]} onChange={e=>setEdits(x=>({...x,[r.d.id]:e.target.value}))}/>
+                  <span style={{fontSize:11,color:P.muted}}>{r.unit}</span>
+                  {+edits[r.d.id]!==+r.qty.toFixed(2)&&<span style={css.badge(P.saffron)}>✏️</span>}
+                </div>
+              </td>
+              <td style={css.td}>{r.d.normCost?<span style={{color:P.purple}}>₹{r.d.normCost}/{r.d.unit}</span>:<span style={{color:"#CCC"}}>—</span>}</td>
+              <td style={css.td}>{issueVal>0?<strong style={{color:P.success}}>₹{issueVal.toFixed(2)}</strong>:<span style={{color:"#CCC"}}>—</span>}</td>
+            </tr>
+          );
+        })}</tbody>
+      </table>
+      {(()=>{
+        const totalCost=Object.values(totals).reduce((s,r)=>s+(r.d.normCost||0)*(+edits[r.d.id]||r.qty),0);
+        return totalCost>0?(
+          <div style={{background:P.success+"18",border:`1px solid ${P.success}33`,borderRadius:7,padding:"8px 12px",marginTop:10,fontSize:13,fontWeight:600,color:P.success,textAlign:"right"}}>
+            📐 {t("Total Normative Issue Value","மொத்த நிலையான வழங்கல் மதிப்பு")}: ₹{totalCost.toFixed(2)}
+          </div>
+        ):null;
+      })()}
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
+        <button style={css.btn("ghost")} onClick={onClose}>{t("Cancel","ரத்து")}</button>
+        <button style={css.btn("success")} onClick={post}>📦 {t("Post Issues","வழங்கு")}</button>
+      </div>
+    </div>
+  );
+}
