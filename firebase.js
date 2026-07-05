@@ -1,17 +1,13 @@
-// ── Firebase configuration ────────────────────────────────────────────────────
-// Replace the values below with YOUR project's config from Firebase Console
-// Firebase Console → Project Settings → Your apps → Web app → Config
-
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey:            "REPLACE_API_KEY",
-  authDomain:        "REPLACE_AUTH_DOMAIN",
-  projectId:         "REPLACE_PROJECT_ID",
-  storageBucket:     "REPLACE_STORAGE_BUCKET",
-  messagingSenderId: "REPLACE_MESSAGING_SENDER_ID",
-  appId:             "REPLACE_APP_ID"
+  apiKey: "AIzaSyDSe4Kw3lb3qBfFn4K0xivxY7Cja_uXtSE",
+  authDomain: "koviloor-kitchen.firebaseapp.com",
+  projectId: "koviloor-kitchen",
+  storageBucket: "koviloor-kitchen.firebasestorage.app",
+  messagingSenderId: "1030034988110",
+  appId: "1:1030034988110:web:30ca96f7484cb2059cb71f"
 };
 
 const app = initializeApp(firebaseConfig);
