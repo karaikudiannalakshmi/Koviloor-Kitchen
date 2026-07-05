@@ -1775,13 +1775,30 @@ function RepDish({ctx}){
 
   const entries=orders.filter(o=>!o.isTemplate&&o.date===dt).flatMap(o=>o.entries.map(e=>({...e,_order:o})));
 
-  // Ingredient sort order: grocery/spice first, vegetable second, sub-recipes last
   const CAT_SORT={grocery:0,spice:1,other:2,cut:3,vegetable:4,sub:9};
   const sortIngs=(ings)=>[...ings].sort((a,b)=>{
     const ca=CAT_SORT[a.d.category]??2;
     const cb=CAT_SORT[b.d.category]??2;
     return ca!==cb?ca-cb:n(a.d).localeCompare(n(b.d));
   });
+
+  // B&W row style — tight name+qty, dot leader fills gap
+  const IngRow=({num,name,qty,unit,isSub,shade})=>(
+    <div style={{display:"flex",alignItems:"baseline",padding:"2px 4px",
+      background:shade?"#F5F5F5":"white",
+      borderBottom:"1px solid #E0E0E0",
+      borderLeft:isSub?"3px solid #555":"none"}}>
+      <span style={{fontSize:11,color:"#777",width:20,flexShrink:0,fontVariantNumeric:"tabular-nums"}}>{num}</span>
+      <span style={{fontSize:12,color:"#111",fontWeight:isSub?700:500,flex:1,overflow:"hidden",
+        whiteSpace:"nowrap",textOverflow:"clip",letterSpacing:"-0.01em"}}>
+        {name}{isSub?" *":""}
+      </span>
+      <span style={{fontSize:12,fontWeight:700,color:"#111",whiteSpace:"nowrap",
+        paddingLeft:4,borderBottom:"1px dotted #999",marginBottom:1,fontVariantNumeric:"tabular-nums"}}>
+        {qty.toFixed(3)} {unit}
+      </span>
+    </div>
+  );
 
   const sessData=SESSIONS.map(sess=>{
     const sessEntries=entries.filter(e=>e.session===sess);
@@ -1892,12 +1909,12 @@ function RepDish({ctx}){
       </ReportBar>
       {!hasData&&<div style={{color:P.muted,textAlign:"center",padding:24}}>{t("No orders for this date.","இந்த தேதியில் ஆர்டர் இல்லை.")}</div>}
       {sessData.map(sd=>(
-        <div key={sd.session} style={{...css.card,marginBottom:16}}>
+        <div key={sd.session} style={{...css.card,marginBottom:16,border:"1px solid #333"}}>
           {/* Session header */}
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:8}}>
             <div style={{display:"flex",alignItems:"center",gap:10}}>
-              <span style={{...css.badge(SCOLOR[sd.session]||P.muted),fontSize:14,padding:"5px 16px"}}>{sd.session}</span>
-              <span style={{fontSize:12,color:P.muted}}>{dt}</span>
+              <span style={{background:"#222",color:"white",fontWeight:700,fontSize:14,padding:"5px 16px",borderRadius:6}}>{sd.session}</span>
+              <span style={{fontSize:12,color:"#555"}}>{dt}</span>
             </div>
             <div style={{display:"flex",gap:6}}>
               <button style={css.btn("ghost",true)} onClick={()=>exportSession(sd)}>📥 {t("Excel","எக்செல்")}</button>
@@ -1907,61 +1924,47 @@ function RepDish({ctx}){
 
           {/* Main recipes */}
           {sd.recs.map(({rec,totalQty,ings},ri)=>(
-            <div key={rec.id} style={{marginBottom:16,borderBottom:"1px solid #F0D8B0",paddingBottom:12}}>
-              {/* Recipe header — quantity prominent */}
-              <div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:8}}>
-                <span style={{fontSize:12,color:P.muted,fontWeight:600,minWidth:20}}>{ri+1}</span>
-                <span style={{fontFamily:"'Playfair Display',serif",fontSize:14,fontWeight:700,color:P.deepBrown,flex:1}}>{n(rec)}</span>
-                <span style={{fontSize:18,fontWeight:800,color:P.saffron,whiteSpace:"nowrap"}}>{totalQty.toFixed(3)} {rec.yieldUnit}</span>
+            <div key={rec.id} style={{marginBottom:16,borderBottom:"1px solid #DDD",paddingBottom:12}}>
+              {/* Recipe header — B&W, quantity prominent */}
+              <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:6,
+                borderBottom:"2px solid #222",paddingBottom:4}}>
+                <span style={{fontSize:11,color:"#777",fontWeight:600,minWidth:20}}>{ri+1}</span>
+                <span style={{fontFamily:"'Playfair Display',serif",fontSize:14,fontWeight:700,color:"#111",flex:1}}>{n(rec)}</span>
+                <span style={{fontSize:17,fontWeight:800,color:"#111",whiteSpace:"nowrap",
+                  background:"#111",color:"white",padding:"1px 8px",borderRadius:4}}>
+                  {totalQty.toFixed(3)} {rec.yieldUnit}
+                </span>
               </div>
               {/* Ingredients sorted: grocery→vegetable→sub */}
-              <table style={{...css.table,marginBottom:0}}>
-                <tbody>
-                  {ings.map((row,i)=>{
-                    const isSub=row.isSubRecipe;
-                    const col=isSub?P.purple:(CATCOLOR[row.d.category]||P.muted);
-                    return(
-                      <tr key={row.d.id} style={{background:isSub?"#FAF5FF":i%2===0?P.white:P.highlight}}>
-                        <td style={{...css.td,width:24,color:P.muted,fontSize:10}}>{i+1}</td>
-                        <td style={css.td}>
-                          <strong style={{color:isSub?P.purple:P.deepBrown}}>{n(row.d)}{isSub?" *":""}</strong>
-                        </td>
-                        <td style={{...css.td,textAlign:"right"}}>
-                          <strong style={{color:col,fontSize:13}}>{row.qty.toFixed(3)} {row.unit}</strong>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <div style={{border:"1px solid #DDD",borderRadius:4,overflow:"hidden"}}>
+                {ings.map((row,i)=>(
+                  <IngRow key={row.d.id} num={i+1} name={n(row.d)}
+                    qty={row.qty} unit={row.unit} isSub={row.isSubRecipe} shade={i%2===1}/>
+                ))}
+              </div>
             </div>
           ))}
 
           {/* Sub-recipe breakdowns */}
           {sd.subSections.length>0&&(
             <div style={{marginTop:8}}>
-              <div style={{fontSize:11,fontWeight:700,color:P.purple,textTransform:"uppercase",letterSpacing:1,marginBottom:8,paddingTop:4,borderTop:"2px solid "+P.purple+"44"}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#333",textTransform:"uppercase",letterSpacing:1,marginBottom:8,paddingTop:6,borderTop:"2px solid #333"}}>
                 {t("Sub-Recipe Breakdowns","துணை சமையல் விவரம்")}
               </div>
               {sd.subSections.map(({d,qty,unit,ings},si)=>(
-                <div key={d.id} style={{marginBottom:14,background:"#FAF5FF",borderLeft:"3px solid "+P.purple,borderRadius:"0 6px 6px 0",padding:"8px 12px"}}>
-                  <div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:6}}>
-                    <span style={{fontSize:12,color:P.purple,fontWeight:700,flex:1}}>{n(d)} *</span>
-                    <span style={{fontSize:16,fontWeight:800,color:P.purple,whiteSpace:"nowrap"}}>{qty.toFixed(3)} {unit}</span>
+                <div key={d.id} style={{marginBottom:14,background:"#FAFAFA",borderLeft:"3px solid #333",borderRadius:"0 6px 6px 0",padding:"8px 12px"}}>
+                  <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:6,
+                    borderBottom:"1px solid #555",paddingBottom:3}}>
+                    <span style={{fontFamily:"'Playfair Display',serif",fontSize:13,fontWeight:700,color:"#111",flex:1}}>{n(d)} *</span>
+                    <span style={{fontSize:15,fontWeight:800,color:"white",background:"#555",
+                      padding:"1px 8px",borderRadius:4,whiteSpace:"nowrap"}}>{qty.toFixed(3)} {unit}</span>
                   </div>
-                  <table style={{...css.table,marginBottom:0}}>
-                    <tbody>
-                      {ings.map((row,i)=>(
-                        <tr key={row.d.id} style={{background:i%2===0?P.white:"#F5F0FF"}}>
-                          <td style={{...css.td,width:24,color:P.muted,fontSize:10}}>{i+1}</td>
-                          <td style={css.td}><strong style={{color:P.deepBrown}}>{n(row.d)}</strong></td>
-                          <td style={{...css.td,textAlign:"right"}}>
-                            <strong style={{color:CATCOLOR[row.d.category]||P.muted,fontSize:13}}>{row.qty.toFixed(3)} {row.unit}</strong>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <div style={{border:"1px solid #DDD",borderRadius:4,overflow:"hidden"}}>
+                    {ings.map((row,i)=>(
+                      <IngRow key={row.d.id} num={i+1} name={n(row.d)}
+                        qty={row.qty} unit={row.unit} isSub={false} shade={i%2===1}/>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
