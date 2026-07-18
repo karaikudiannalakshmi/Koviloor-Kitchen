@@ -404,7 +404,6 @@ function App(){
   if(!loaded) return(<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#FEF6E8",flexDirection:"column",gap:12}}>
     <div style={{fontSize:32}}>🍛</div><div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#5C2A0A"}}>Koviloor Kitchen</div>
     <div style={{fontSize:13,color:"#9B7355"}}>Loading from cloud...</div></div>);
-
   return (
     <div style={css.app}>
       <nav style={css.nav}>
@@ -554,12 +553,31 @@ function IngsPage({ctx}){
 
   const dlTemplate=()=>{
     const ws=XLSX.utils.json_to_sheet([
-      {Name:"Rice",Tamil:"அரிசி",Category:"grocery",Unit:"kg",NormCost:45,ScalingFactor:"",ScalingBenchmark:""},
-      {Name:"Salt",Tamil:"உப்பு",Category:"spice",Unit:"g",NormCost:0.018,ScalingFactor:0.75,ScalingBenchmark:200},
-      {Name:"Onion",Tamil:"வெங்காயம்",Category:"vegetable",Unit:"kg",NormCost:40,ScalingFactor:"",ScalingBenchmark:""},
+      {name:"Rice",nameTamil:"அரிசி",category:"grocery",unit:"kg",normCost:45},
+      {name:"Salt",nameTamil:"உப்பு",category:"spice",unit:"g",normCost:0.018},
+      {name:"Onion",nameTamil:"வெங்காயம்",category:"vegetable",unit:"kg",normCost:40},
     ]);
     const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Ingredients");
     XLSX.writeFile(wb,"ingredients_template.xlsx");
+  };
+
+  const exportIngredients=()=>{
+    const data=ingredients.map(ing=>({
+      name:ing.name,
+      nameTamil:ing.nameTamil||"",
+      category:ing.category||"grocery",
+      unit:ing.unit||"kg",
+      normCost:ing.normCost||0,
+      scalingFactor:ing.scalingFactor||"",
+      scalingBenchmark:ing.scalingBenchmark||"",
+      cutYield:ing.cutYield||"",
+      cutUnit:ing.cutUnit||"",
+    }));
+    const ws=XLSX.utils.json_to_sheet(data);
+    ws["!cols"]=[{wch:30},{wch:28},{wch:12},{wch:8},{wch:12},{wch:14},{wch:16},{wch:10},{wch:10}];
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Ingredients");
+    XLSX.writeFile(wb,"ingredients_export.xlsx");
   };
 
   const visible=cat==="all"?ingredients:ingredients.filter(i=>i.category===cat);
@@ -586,7 +604,8 @@ function IngsPage({ctx}){
           </button>
         ))}
         <div style={{marginLeft:"auto",display:"flex",gap:6}}>
-          <button style={css.btn("ghost",true)} onClick={dlTemplate}>📥 {t("Download Template","டெம்ப்ளேட்")}</button>
+          <button style={css.btn("ghost",true)} onClick={exportIngredients}>⬇️ {t("Export Excel","Excel ஏற்று")}</button>
+          <button style={css.btn("ghost",true)} onClick={dlTemplate}>📋 {t("Template","டெம்ப்ளேட்")}</button>
           <button style={css.btn("success",true)} onClick={()=>fRef.current.click()}>📤 {t("Import Excel","Excel இறக்கு")}</button>
           <input ref={fRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importXlsx}/>
           <button style={{...css.btn("ghost",true),borderColor:P.purple,color:translating?P.muted:P.purple}}
@@ -652,8 +671,34 @@ function RecsPage({ctx}){
   const t=(en,ta)=>lang==="en"?en:ta;
   const [showSub,setShowSub]=useState(false);
   const [q,setQ]=useState("");
-
   const [typeF,setTypeF]=useState("all");
+  const [translating,setTranslating]=useState(false);
+  const [transProgress,setTransProgress]=useState("");
+
+  const translateRecipes=async()=>{
+    const need=recipes.filter(x=>!x.nameTamil||!x.nameTamil.trim());
+    if(!need.length){alert("All recipes already have Tamil names.");return;}
+    if(!confirm("Translate "+need.length+" recipe names to Tamil using AI? This may take a minute."))return;
+    setTranslating(true);
+    const BATCH=40; const results={};
+    for(let bi=0;bi<need.length;bi+=BATCH){
+      const batch=need.slice(bi,bi+BATCH);
+      setTransProgress("Translating "+(bi+1)+"–"+Math.min(bi+BATCH,need.length)+" of "+need.length+"...");
+      try{
+        const res=await fetch("/api/translate",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({names:batch.map(x=>x.name)})});
+        const data=await res.json();
+        if(data.translations)Object.assign(results,data.translations);
+      }catch(err){console.error(err);}
+    }
+    setRecipes(prev=>prev.map(r=>{
+      if(r.nameTamil&&r.nameTamil.trim())return r;
+      const tamil=results[r.name];
+      return tamil?{...r,nameTamil:tamil}:r;
+    }));
+    setTranslating(false); setTransProgress("");
+    alert("Done! Translated "+Object.keys(results).length+" recipes.");
+  };
 
   const vis=recipes
     .filter(r=>showSub||!r.isSubRecipe)
@@ -675,6 +720,10 @@ function RecsPage({ctx}){
         </label>
         <div style={{marginLeft:"auto",display:"flex",gap:6}}>
           <button style={css.btn("ghost",true)} onClick={()=>setModal({type:"recipeTypes"})}>⚙️ {t("Manage Types","வகை நிர்வகி")}</button>
+          <button style={{...css.btn("ghost",true),borderColor:P.purple,color:translating?P.muted:P.purple}}
+            onClick={translateRecipes} disabled={translating}>
+            {translating?"⏳ "+transProgress:"🔤 "+t("Translate Tamil","தமிழில் மொழிபெயர்")}
+          </button>
           <button style={css.btn()} onClick={()=>setModal({type:"recipe"})}>+ {t("Add Recipe","சேர்")}</button>
         </div>
       </div>
