@@ -665,6 +665,7 @@ function RecsPage({ctx}){
   const [typeF,setTypeF]=useState("all");
   const [translating,setTranslating]=useState(false);
   const [transProgress,setTransProgress]=useState("");
+  const recFileRef=useRef();
 
   const exportRecipes=()=>{
     const data=recipes.map(r=>({
