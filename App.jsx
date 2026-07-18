@@ -301,22 +301,34 @@ const INV0={
 
 // ── Expand a recipe's raw ingredients recursively via subLinks ────────────────
 // mainMult = how many times the base recipe is being made
-function expandRecipeIngs(rec, mainMult, recipes, ingredients) {
+function expandRecipeIngs(rec, mainMult, recipes, ingredients, expandSubs=true) {
+  // expandSubs=false: sub-recipes shown as single line items (dish-wise report)
+  // expandSubs=true:  sub-recipes expanded into raw ingredients (shopping list, cost)
   const result = [];
-  // 1. Direct ingredients
+
+  // 1. Always show direct ingredients
   (rec.ingredients||[]).forEach(ing => {
     const d = ingredients.find(x => x.id === ing.iid); if (!d) return;
     const scaled = applyScaling(ing.qty, mainMult, d.scalingFactor, d.scalingBenchmark);
     result.push({ d, qty: scaled, unit: ing.unit });
   });
-  // 2. Sub-recipe links — each link says "I need `link.qty` units of subRecipe per base yield of THIS recipe"
+
+  // 2. Sub-recipe links
   (rec.subLinks||[]).forEach(link => {
     const sub = recipes.find(r => r.id === link.subId); if (!sub) return;
-    // sub multiplier: (link.qty * mainMult) / sub.yield
-    const subMult = (link.qty * mainMult) / (sub.yield || 1);
-    // recursively expand sub-recipe (sub-recipes can themselves have subLinks)
-    const subIngs = expandRecipeIngs(sub, subMult, recipes, ingredients);
-    subIngs.forEach(si => result.push(si));
+    const scaledQty = link.qty * mainMult;
+    if (!expandSubs) {
+      // Show sub-recipe as a single virtual ingredient line
+      const virtualIng = {
+        id: 'sub_'+sub.id, name: sub.name, nameTamil: sub.nameTamil||sub.name,
+        category: 'sub', unit: sub.yieldUnit||link.unit, normCost: 0, isSubRecipe: true,
+      };
+      result.push({ d: virtualIng, qty: +scaledQty.toFixed(4), unit: sub.yieldUnit||link.unit, isSubRecipe: true });
+    } else {
+      // Fully expand sub-recipe into raw ingredients
+      const subMult = scaledQty / (sub.yield || 1);
+      expandRecipeIngs(sub, subMult, recipes, ingredients, true).forEach(si => result.push(si));
+    }
   });
   return result;
 }
@@ -365,15 +377,8 @@ function App(){
   const [page,setPage]=useState("ingredients");
   const [lang,setLang]=useState("en");
   const [modal,setModal]=useState(null);
-  const {
-    loaded,saveStatus,forceSave,
-    ingredients,setIngredients,
-    recipes,setRecipes,
-    orders,setOrders,
-    inventory,setInventory,
-    locations,setLocations,
-    recipeTypes,setRecipeTypes,
-  } = useKitchenData();
+  const {loaded,saveStatus,forceSave,ingredients,setIngredients,recipes,setRecipes,
+    orders,setOrders,inventory,setInventory,locations,setLocations,recipeTypes,setRecipeTypes} = useKitchenData();
 
   const ctx={lang,ingredients,setIngredients,recipes,setRecipes,locations,setLocations,orders,setOrders,inventory,setInventory,recipeTypes,setRecipeTypes,setModal};
   const t=(en,ta)=>lang==="en"?en:ta;
@@ -395,13 +400,9 @@ function App(){
   const flat=NAV.flatMap(n=>n.children?[n,...n.children]:[n]);
   const cur=flat.find(p=>p.id===page)||NAV[0];
 
-  if(!loaded) return(
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#FEF6E8",flexDirection:"column",gap:12}}>
-      <div style={{fontSize:32}}>🍛</div>
-      <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#5C2A0A"}}>Koviloor Kitchen</div>
-      <div style={{fontSize:13,color:"#9B7355"}}>Loading from cloud...</div>
-    </div>
-  );
+  if(!loaded) return(<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#FEF6E8",flexDirection:"column",gap:12}}>
+    <div style={{fontSize:32}}>🍛</div><div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#5C2A0A"}}>Koviloor Kitchen</div>
+    <div style={{fontSize:13,color:"#9B7355"}}>Loading from cloud...</div></div>);
 
   return (
     <div style={css.app}>
@@ -437,21 +438,14 @@ function App(){
               <option value="ta">தமிழ்</option>
             </select>
           </div>
-          <button
-            disabled={saveStatus==="saving"||saveStatus==="idle"||saveStatus==="saved"}
-            onClick={forceSave}
-            style={{
-              marginLeft:12,padding:"6px 18px",borderRadius:7,border:"none",
-              cursor:saveStatus==="pending"?"pointer":"default",
-              fontWeight:700,fontSize:12,
+          <button disabled={saveStatus==="saving"||saveStatus==="idle"||saveStatus==="saved"} onClick={forceSave}
+            style={{marginLeft:12,padding:"6px 18px",borderRadius:7,border:"none",cursor:saveStatus==="pending"?"pointer":"default",fontWeight:700,fontSize:12,
               background:saveStatus==="error"?"#C0392B":saveStatus==="saved"?"#1A7A40":saveStatus==="pending"?"#E8821A":"#DCC88A",
-              color:"white",opacity:saveStatus==="idle"||saveStatus==="saved"?0.6:1,transition:"all 0.2s",
-            }}>
+              color:"white",opacity:saveStatus==="idle"||saveStatus==="saved"?0.6:1,transition:"all 0.2s"}}>
             {saveStatus==="saving"?"⏳ Saving...":saveStatus==="saved"?"✓ Saved":saveStatus==="error"?"⚠ Retry Save":"💾 Save"}
           </button>
           <button onClick={()=>{sessionStorage.removeItem("kk_auth");window.location.reload();}}
-            style={{marginLeft:8,padding:"6px 12px",borderRadius:7,border:"1px solid #DCC88A",
-              background:"transparent",color:"#9B7355",fontSize:12,cursor:"pointer",fontWeight:600}}>
+            style={{marginLeft:8,padding:"6px 12px",borderRadius:7,border:"1px solid #DCC88A",background:"transparent",color:"#9B7355",fontSize:12,cursor:"pointer",fontWeight:600}}>
             🔒 Lock
           </button>
         </div>
@@ -505,30 +499,17 @@ function IngsPage({ctx}){
     const needTranslation=ingredients.filter(x=>!x.nameTamil||!x.nameTamil.trim());
     if(!needTranslation.length){alert("All ingredients already have Tamil names.");return;}
     if(!confirm("Translate "+needTranslation.length+" ingredient names to Tamil using AI? This may take a minute."))return;
-    setTranslating(true);
-    const BATCH=40;
-    const results={};
+    setTranslating(true); const BATCH=40; const results={};
     for(let bi=0;bi<needTranslation.length;bi+=BATCH){
       const batch=needTranslation.slice(bi,bi+BATCH);
       setTransProgress("Translating "+(bi+1)+"–"+Math.min(bi+BATCH,needTranslation.length)+" of "+needTranslation.length+"...");
       try{
-        const res=await fetch("/api/translate",{
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({names:batch.map(x=>x.name)})
-        });
-        const data=await res.json();
-        if(data.translations)Object.assign(results,data.translations);
-      }catch(err){console.error("Translation batch error:",err);}
+        const res=await fetch("/api/translate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({names:batch.map(x=>x.name)})});
+        const data=await res.json(); if(data.translations)Object.assign(results,data.translations);
+      }catch(err){console.error(err);}
     }
-    setIngredients(prev=>prev.map(ing=>{
-      if(ing.nameTamil&&ing.nameTamil.trim())return ing;
-      const tamil=results[ing.name];
-      return tamil?{...ing,nameTamil:tamil}:ing;
-    }));
-    setTranslating(false);
-    setTransProgress("");
-    alert("Done! Translated "+Object.keys(results).length+" ingredients.");
+    setIngredients(prev=>prev.map(ing=>{if(ing.nameTamil&&ing.nameTamil.trim())return ing;const tamil=results[ing.name];return tamil?{...ing,nameTamil:tamil}:ing;}));
+    setTranslating(false); setTransProgress(""); alert("Done! Translated "+Object.keys(results).length+" ingredients.");
   };
 
   const importXlsx=e=>{
@@ -1654,7 +1635,33 @@ function RepDish({ctx}){
 
   const entries=orders.filter(o=>!o.isTemplate&&o.date===dt).flatMap(o=>o.entries.map(e=>({...e,_order:o})));
 
-  // Build session → recipe → ingredients
+  // grocery/spice/other first → vegetable → sub-recipes last
+  const CAT_SORT={grocery:0,spice:0,other:1,cut:1,vegetable:2,sub:9};
+  const sortIngs=(ings)=>[...ings].sort((a,b)=>{
+    const ca=CAT_SORT[a.d.category]??1;
+    const cb=CAT_SORT[b.d.category]??1;
+    if(ca!==cb)return ca-cb;
+    return n(a.d).trim().localeCompare(n(b.d).trim());
+  });
+
+  // B&W row style — tight name+qty, dot leader fills gap
+  const IngRow=({num,name,qty,unit,isSub,shade})=>(
+    <div style={{display:"flex",alignItems:"baseline",padding:"2px 4px",
+      background:shade?"#F5F5F5":"white",
+      borderBottom:"1px solid #E0E0E0",
+      borderLeft:isSub?"3px solid #555":"none"}}>
+      <span style={{fontSize:11,color:"#777",width:20,flexShrink:0,fontVariantNumeric:"tabular-nums"}}>{num}</span>
+      <span style={{fontSize:12,color:"#111",fontWeight:isSub?700:500,flex:1,overflow:"hidden",
+        whiteSpace:"nowrap",textOverflow:"clip",letterSpacing:"-0.01em"}}>
+        {name}{isSub?" *":""}
+      </span>
+      <span style={{fontSize:12,fontWeight:700,color:"#111",whiteSpace:"nowrap",
+        paddingLeft:4,borderBottom:"1px dotted #999",marginBottom:1,fontVariantNumeric:"tabular-nums"}}>
+        {qty.toFixed(3)} {unit}
+      </span>
+    </div>
+  );
+
   const sessData=SESSIONS.map(sess=>{
     const sessEntries=entries.filter(e=>e.session===sess);
     const byRec={};
@@ -1666,43 +1673,93 @@ function RepDish({ctx}){
     });
     const recs=Object.values(byRec).map(item=>({
       ...item,
-      ings:mergeIngs(expandRecipeIngs(item.rec,item.totalMult,recipes,ingredients,false))
+      ings:sortIngs(mergeIngs(expandRecipeIngs(item.rec,item.totalMult,recipes,ingredients,false)))
     }));
-    return {session:sess,recs};
+
+    // Collect sub-recipes used across all main recipes in this session
+    const subMap={};
+    recs.forEach(({ings,totalMult,rec})=>{
+      ings.filter(r=>r.isSubRecipe).forEach(r=>{
+        const sid=r.d.id;
+        if(!subMap[sid])subMap[sid]={d:r.d,qty:0,unit:r.unit,subRec:recipes.find(x=>'sub_'+x.id===sid||x.name===r.d.name)};
+        subMap[sid].qty+=r.qty;
+      });
+    });
+    const subSections=Object.values(subMap).map(s=>({
+      ...s,
+      ings:s.subRec?sortIngs(mergeIngs(expandRecipeIngs(s.subRec,s.qty/(s.subRec.yield||1),recipes,ingredients,false))):[]
+    }));
+
+    return {session:sess,recs,subSections};
   }).filter(sd=>sd.recs.length>0);
 
   const hasData=sessData.length>0;
 
   const printSession=(sd)=>{
-    const recBlocks=sd.recs.map(({rec,totalQty,ings})=>{
-      const ingRows=ings.map(r=>"<tr><td><strong>"+n(r.d)+"</strong></td><td>"+r.d.category+"</td><td><strong>"+r.qty.toFixed(2)+" "+r.unit+"</strong></td></tr>").join("");
-      return "<h3 style='color:#5C2A0A;margin:14px 0 4px'>"+n(rec)+" <span style='font-size:12px;font-weight:400;color:#9B7355'>"+totalQty.toFixed(1)+" "+rec.yieldUnit+"</span></h3>"
-        +"<table><thead><tr><th>"+t("Ingredient","பொருள்")+"</th><th>"+t("Category","வகை")+"</th><th>"+t("Qty","அளவு")+"</th></tr></thead>"
-        +"<tbody>"+ingRows+"</tbody></table>";
+    let recNo=0;
+    const mainBlocks=sd.recs.map(({rec,totalQty,ings})=>{
+      recNo++;
+      const ingRows=ings.map((r,i)=>{
+        const isSub=r.isSubRecipe;
+        const name=n(r.d)+(isSub?" *":"");
+        return "<tr style='"+(isSub?"background:#F5F0FF":"")+"'>"
+          +"<td style='width:28px;color:#999;font-size:11px'>"+(i+1)+"</td>"
+          +"<td><strong>"+name+"</strong></td>"
+          +"<td style='text-align:right;font-weight:600;color:#E8821A'>"+r.qty.toFixed(3)+" "+r.unit+"</td>"
+          +"</tr>";
+      }).join("");
+      return "<div style='margin-bottom:18px'>"
+        +"<div style='display:flex;align-items:baseline;gap:10px;border-bottom:2px solid #5C2A0A;padding-bottom:4px;margin-bottom:6px'>"
+        +"<span style='font-size:13px;color:#9B7355;font-weight:600'>"+recNo+"</span>"
+        +"<span style='font-family:serif;font-size:15px;font-weight:700;color:#5C2A0A'>"+n(rec)+"</span>"
+        +"<span style='margin-left:auto;font-size:16px;font-weight:800;color:#E8821A'>"+totalQty.toFixed(3)+" "+rec.yieldUnit+"</span>"
+        +"</div>"
+        +(ings.length>0?"<table style='width:100%;border-collapse:collapse'><tbody>"+ingRows+"</tbody></table>":"")
+        +"</div>";
     }).join("");
+
+    const subBlocks=sd.subSections.map(({d,qty,unit,ings})=>{
+      recNo++;
+      const ingRows=ings.map((r,i)=>
+        "<tr><td style='width:28px;color:#999;font-size:11px'>"+(i+1)+"</td>"
+        +"<td><strong>"+n(r.d)+"</strong></td>"
+        +"<td style='text-align:right;font-weight:600;color:#E8821A'>"+r.qty.toFixed(3)+" "+r.unit+"</td></tr>"
+      ).join("");
+      return "<div style='margin-bottom:18px;background:#FAFAFA;padding:8px;border-left:3px solid #6B3FA0'>"
+        +"<div style='display:flex;align-items:baseline;gap:10px;border-bottom:1px solid #C4B5FD;padding-bottom:4px;margin-bottom:6px'>"
+        +"<span style='font-size:13px;color:#9B7355;font-weight:600'>"+recNo+"</span>"
+        +"<span style='font-family:serif;font-size:15px;font-weight:700;color:#6B3FA0'>"+n(d)+" *</span>"
+        +"<span style='margin-left:auto;font-size:16px;font-weight:800;color:#6B3FA0'>"+qty.toFixed(3)+" "+unit+"</span>"
+        +"</div>"
+        +(ings.length>0?"<table style='width:100%;border-collapse:collapse'><tbody>"+ingRows+"</tbody></table>":"")
+        +"</div>";
+    }).join("");
+
     printHTML(sd.session+" — "+t("Dish-wise Ingredients","சமையல் வாரியாக பொருட்கள்")+" ("+dt+")",
-      "<h2 style='border:none;margin:0 0 4px'>"+sd.session+"</h2><p style='color:#9B7355;margin:0 0 12px;font-size:12px'>"+t("Date","தேதி")+": "+dt+" &nbsp;|&nbsp; "+sd.recs.length+" "+t("dish(es)","சமையல்")+"</p>"+recBlocks);
+      "<h2 style='border:none;margin:0 0 4px'>"+sd.session+"</h2>"
+      +"<p style='color:#9B7355;margin:0 0 14px;font-size:12px'>"+t("Date","தேதி")+": "+dt+"</p>"
+      +mainBlocks
+      +(subBlocks?"<h3 style='color:#6B3FA0;border-top:2px solid #6B3FA0;padding-top:8px;margin-top:4px'>"+t("Sub-Recipe Breakdowns","துணை சமையல் விவரம்")+"</h3>"+subBlocks:""));
   };
 
   const exportSession=(sd)=>{
-    // Build rows with recipe as bold heading row, ingredients below, blank row between
     const rows=[];
-    sd.recs.forEach(({rec,totalQty,ings},ri)=>{
-      // Recipe heading row
-      rows.push({
-        "Recipe / Ingredient":"▶ "+n(rec)+" ("+totalQty.toFixed(1)+" "+rec.yieldUnit+")",
-        Category:"",Quantity:"",Unit:""
-      });
-      // Ingredient rows
+    sd.recs.forEach(({rec,totalQty,ings})=>{
+      rows.push({"Recipe / Ingredient":"▶ "+n(rec)+" ("+totalQty.toFixed(3)+" "+rec.yieldUnit+")",Category:"",Quantity:"",Unit:""});
       ings.forEach(r=>rows.push({
-        "Recipe / Ingredient":"    "+n(r.d),
-        Category:r.d.category,
-        Quantity:+r.qty.toFixed(2),
-        Unit:r.unit,
+        "Recipe / Ingredient":"  "+(r.isSubRecipe?"* ":"")+n(r.d),
+        Category:r.d.category, Quantity:+r.qty.toFixed(3), Unit:r.unit,
       }));
-      // Blank separator
-      if(ri<sd.recs.length-1)rows.push({"Recipe / Ingredient":"",Category:"",Quantity:"",Unit:""});
+      rows.push({"Recipe / Ingredient":"",Category:"",Quantity:"",Unit:""});
     });
+    if(sd.subSections.length>0){
+      rows.push({"Recipe / Ingredient":"— Sub-Recipe Breakdowns —",Category:"",Quantity:"",Unit:""});
+      sd.subSections.forEach(({d,qty,unit,ings})=>{
+        rows.push({"Recipe / Ingredient":"▶ * "+n(d)+" ("+qty.toFixed(3)+" "+unit+")",Category:"",Quantity:"",Unit:""});
+        ings.forEach(r=>rows.push({"Recipe / Ingredient":"  "+n(r.d),Category:r.d.category,Quantity:+r.qty.toFixed(3),Unit:r.unit}));
+        rows.push({"Recipe / Ingredient":"",Category:"",Quantity:"",Unit:""});
+      });
+    }
     exportXlsxSheets("dish_ingredients_"+sd.session+"_"+dt+".xlsx",[{name:sd.session.slice(0,31),data:rows}]);
   };
 
@@ -1714,50 +1771,71 @@ function RepDish({ctx}){
       </ReportBar>
       {!hasData&&<div style={{color:P.muted,textAlign:"center",padding:24}}>{t("No orders for this date.","இந்த தேதியில் ஆர்டர் இல்லை.")}</div>}
       {sessData.map(sd=>(
-        <div key={sd.session} style={{...css.card,marginBottom:16}}>
-          {/* Session header with print/export buttons */}
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
+        <div key={sd.session} style={{...css.card,marginBottom:16,border:"1px solid #333"}}>
+          {/* Session header */}
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:8}}>
             <div style={{display:"flex",alignItems:"center",gap:10}}>
-              <span style={{...css.badge(SCOLOR[sd.session]||P.muted),fontSize:14,padding:"5px 16px"}}>{sd.session}</span>
-              <span style={{fontSize:12,color:P.muted}}>{dt}</span>
+              <span style={{background:"#222",color:"white",fontWeight:700,fontSize:14,padding:"5px 16px",borderRadius:6}}>{sd.session}</span>
+              <span style={{fontSize:12,color:"#555"}}>{dt}</span>
             </div>
             <div style={{display:"flex",gap:6}}>
               <button style={css.btn("ghost",true)} onClick={()=>exportSession(sd)}>📥 {t("Excel","எக்செல்")}</button>
               <button style={css.btn("primary",true)} onClick={()=>printSession(sd)}>🖨 {t("Print","அச்சு")}</button>
             </div>
           </div>
-          {/* Dishes in this session */}
-          {sd.recs.map(({rec,totalQty,ings})=>(
-            <div key={rec.id} style={{marginBottom:14}}>
-              <div style={{fontFamily:"'Playfair Display',serif",fontSize:13,fontWeight:700,color:P.deepBrown,
-                borderBottom:"1px solid #EDD9A3",paddingBottom:5,marginBottom:6}}>
-                {n(rec)}
-                <span style={{marginLeft:10,fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:400,color:P.muted}}>
-                  {totalQty.toFixed(1)} {rec.yieldUnit}
+
+          {/* Main recipes */}
+          {sd.recs.map(({rec,totalQty,ings},ri)=>(
+            <div key={rec.id} style={{marginBottom:16,borderBottom:"1px solid #DDD",paddingBottom:12}}>
+              {/* Recipe header — B&W, quantity prominent */}
+              <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:6,
+                borderBottom:"2px solid #222",paddingBottom:4}}>
+                <span style={{fontSize:11,color:"#777",fontWeight:600,minWidth:20}}>{ri+1}</span>
+                <span style={{fontFamily:"'Playfair Display',serif",fontSize:14,fontWeight:700,color:"#111",flex:1}}>{n(rec)}</span>
+                <span style={{fontSize:17,fontWeight:800,color:"#111",whiteSpace:"nowrap",
+                  background:"#111",color:"white",padding:"1px 8px",borderRadius:4}}>
+                  {totalQty.toFixed(3)} {rec.yieldUnit}
                 </span>
               </div>
-              <table style={css.table}>
-                <thead><tr>
-                  <th style={css.th}>{t("Ingredient","பொருள்")}</th>
-                  <th style={css.th}>{t("Category","வகை")}</th>
-                  <th style={css.th}>{t("Quantity","அளவு")}</th>
-                </tr></thead>
-                <tbody>{ings.map((row,i)=>(
-                  <tr key={row.d.id} style={{background:i%2===0?P.white:P.highlight}}>
-                    <td style={css.td}><strong>{n(row.d)}</strong></td>
-                    <td style={css.td}><span style={css.badge(CATCOLOR[row.d.category]||P.muted)}>{row.d.category}</span></td>
-                    <td style={css.td}><strong style={{color:P.saffron}}>{row.qty.toFixed(2)} {row.unit}</strong></td>
-                  </tr>
-                ))}</tbody>
-              </table>
+              {/* Ingredients sorted: grocery→vegetable→sub */}
+              <div style={{border:"1px solid #DDD",borderRadius:4,overflow:"hidden"}}>
+                {ings.map((row,i)=>(
+                  <IngRow key={row.d.id} num={i+1} name={n(row.d)}
+                    qty={row.qty} unit={row.unit} isSub={row.isSubRecipe} shade={i%2===1}/>
+                ))}
+              </div>
             </div>
           ))}
+
+          {/* Sub-recipe breakdowns */}
+          {sd.subSections.length>0&&(
+            <div style={{marginTop:8}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#333",textTransform:"uppercase",letterSpacing:1,marginBottom:8,paddingTop:6,borderTop:"2px solid #333"}}>
+                {t("Sub-Recipe Breakdowns","துணை சமையல் விவரம்")}
+              </div>
+              {sd.subSections.map(({d,qty,unit,ings},si)=>(
+                <div key={d.id} style={{marginBottom:14,background:"#FAFAFA",borderLeft:"3px solid #333",borderRadius:"0 6px 6px 0",padding:"8px 12px"}}>
+                  <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:6,
+                    borderBottom:"1px solid #555",paddingBottom:3}}>
+                    <span style={{fontFamily:"'Playfair Display',serif",fontSize:13,fontWeight:700,color:"#111",flex:1}}>{n(d)} *</span>
+                    <span style={{fontSize:15,fontWeight:800,color:"white",background:"#555",
+                      padding:"1px 8px",borderRadius:4,whiteSpace:"nowrap"}}>{qty.toFixed(3)} {unit}</span>
+                  </div>
+                  <div style={{border:"1px solid #DDD",borderRadius:4,overflow:"hidden"}}>
+                    {ings.map((row,i)=>(
+                      <IngRow key={row.d.id} num={i+1} name={n(row.d)}
+                        qty={row.qty} unit={row.unit} isSub={false} shade={i%2===1}/>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       ))}
     </div>
   );
 }
-
 
 function RepIng({ctx}){
   const {orders,recipes,ingredients,lang:gLang}=ctx;
