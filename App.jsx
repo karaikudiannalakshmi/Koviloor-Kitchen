@@ -732,10 +732,10 @@ function RecsPage({ctx}){
         {usedTypes.map(tid=>{const tp=recipeTypes.find(x=>x.id===tid);return tp?<button key={tid} style={{...css.btn("ghost",true),borderColor:tp.color||P.muted,color:tp.color||P.muted,fontWeight:typeF===tid?700:400}} onClick={()=>setTypeF(typeF===tid?"all":tid)}>{lang==="en"?tp.en:tp.ta}</button>:null;})}
       </div>
 
-      <div style={{fontSize:11,color:"#92400E",background:"#FFF3CD",border:"1px solid #F59E0B",
+      <div style={{fontSize:11,color:"#1E40AF",background:"#DBEAFE",border:"1px solid #2563EB",
         borderRadius:6,padding:"5px 12px",marginBottom:8,display:"inline-flex",alignItems:"center",gap:6}}>
-        <span style={{width:10,height:10,background:"#F59E0B",borderRadius:2,display:"inline-block",flexShrink:0}}/>
-        {t("Yellow rows have no ingredients — click to edit","மஞ்சள் வரிசைகளில் பொருட்கள் இல்லை — திருத்த கிளிக்")}
+        <span style={{width:10,height:10,background:"#2563EB",borderRadius:2,display:"inline-block",flexShrink:0}}/>
+        {t("Blue rows have no ingredients — click to edit","நீல வரிசைகளில் பொருட்கள் இல்லை — திருத்த கிளிக்")}
       </div>
       <div style={{...css.card,padding:0,overflow:"hidden"}}>
         <table style={css.table}>
@@ -754,11 +754,11 @@ function RecsPage({ctx}){
             {vis.length===0&&<tr><td colSpan={8} style={{...css.td,textAlign:"center",color:P.muted,padding:20}}>{t("No recipes found.","சமையல் இல்லை.")}</td></tr>}
             {vis.map((r,i)=>{
               const noIngs=!(r.ingredients||[]).length&&!(r.subLinks||[]).length;
-              const rowBg=noIngs?"#FFF3CD":i%2===0?P.white:P.highlight;
-              const hoverBg=noIngs?"#FFE082":"#FDE8C4";
+              const rowBg=noIngs?"#DBEAFE":i%2===0?P.white:P.highlight;
+              const hoverBg=noIngs?"#BFDBFE":"#FDE8C4";
               return(
               <tr key={r.id} style={{background:rowBg,cursor:"pointer",
-                borderLeft:noIngs?"3px solid #F59E0B":"none"}}
+                borderLeft:noIngs?"3px solid #2563EB":"none"}}
                   onMouseEnter={e=>e.currentTarget.style.background=hoverBg}
                   onMouseLeave={e=>e.currentTarget.style.background=rowBg}>
                 <td style={{...css.td,width:28,color:P.muted,fontSize:10}}>{i+1}</td>
