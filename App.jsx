@@ -401,9 +401,7 @@ function App(){
   const flat=NAV.flatMap(n=>n.children?[n,...n.children]:[n]);
   const cur=flat.find(p=>p.id===page)||NAV[0];
 
-  if(!loaded) return(<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#FEF6E8",flexDirection:"column",gap:12}}>
-    <div style={{fontSize:32}}>🍛</div><div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#5C2A0A"}}>Koviloor Kitchen</div>
-    <div style={{fontSize:13,color:"#9B7355"}}>Loading from cloud...</div></div>);
+  if(!loaded) return(<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#FEF6E8",flexDirection:"column",gap:12}}><div style={{fontSize:32}}>🍛</div><div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#5C2A0A"}}>Koviloor Kitchen</div><div style={{fontSize:13,color:"#9B7355"}}>Loading from cloud...</div></div>);
   return (
     <div style={css.app}>
       <nav style={css.nav}>
@@ -438,16 +436,8 @@ function App(){
               <option value="ta">தமிழ்</option>
             </select>
           </div>
-          <button disabled={saveStatus==="saving"||saveStatus==="idle"||saveStatus==="saved"} onClick={forceSave}
-            style={{marginLeft:12,padding:"6px 18px",borderRadius:7,border:"none",cursor:saveStatus==="pending"?"pointer":"default",fontWeight:700,fontSize:12,
-              background:saveStatus==="error"?"#C0392B":saveStatus==="saved"?"#1A7A40":saveStatus==="pending"?"#E8821A":"#DCC88A",
-              color:"white",opacity:saveStatus==="idle"||saveStatus==="saved"?0.6:1,transition:"all 0.2s"}}>
-            {saveStatus==="saving"?"⏳ Saving...":saveStatus==="saved"?"✓ Saved":saveStatus==="error"?"⚠ Retry Save":"💾 Save"}
-          </button>
-          <button onClick={()=>{sessionStorage.removeItem("kk_auth");window.location.reload();}}
-            style={{marginLeft:8,padding:"6px 12px",borderRadius:7,border:"1px solid #DCC88A",background:"transparent",color:"#9B7355",fontSize:12,cursor:"pointer",fontWeight:600}}>
-            🔒 Lock
-          </button>
+          <button disabled={saveStatus==="saving"||saveStatus==="idle"||saveStatus==="saved"} onClick={forceSave} style={{marginLeft:12,padding:"6px 18px",borderRadius:7,border:"none",cursor:saveStatus==="pending"?"pointer":"default",fontWeight:700,fontSize:12,background:saveStatus==="error"?"#C0392B":saveStatus==="saved"?"#1A7A40":saveStatus==="pending"?"#E8821A":"#DCC88A",color:"white",opacity:saveStatus==="idle"||saveStatus==="saved"?0.6:1,transition:"all 0.2s"}}>{saveStatus==="saving"?"⏳ Saving...":saveStatus==="saved"?"✓ Saved":saveStatus==="error"?"⚠ Retry Save":"💾 Save"}</button>
+          <button onClick={()=>{sessionStorage.removeItem("kk_auth");window.location.reload();}} style={{marginLeft:8,padding:"6px 12px",borderRadius:7,border:"1px solid #DCC88A",background:"transparent",color:"#9B7355",fontSize:12,cursor:"pointer",fontWeight:600}}>🔒 Lock</button>
         </div>
         <div style={css.content}>
           {page==="ingredients"&&<IngsPage ctx={ctx}/>}
@@ -494,6 +484,7 @@ function IngsPage({ctx}){
   const fRef=useRef();
   const [translating,setTranslating]=useState(false);
   const [transProgress,setTransProgress]=useState("");
+  const recFileRef=useRef();
 
   const translateToTamil=async()=>{
     const needTranslation=ingredients.filter(x=>!x.nameTamil||!x.nameTamil.trim());
@@ -675,6 +666,45 @@ function RecsPage({ctx}){
   const [translating,setTranslating]=useState(false);
   const [transProgress,setTransProgress]=useState("");
 
+  const exportRecipes=()=>{
+    const data=recipes.map(r=>({
+      name:r.name,
+      nameTamil:r.nameTamil||"",
+    }));
+    const ws=XLSX.utils.json_to_sheet(data);
+    ws["!cols"]=[{wch:40},{wch:40}];
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Recipes");
+    XLSX.writeFile(wb,"recipes_export.xlsx");
+  };
+
+  const importRecipesTamil=(e)=>{
+    const file=e.target.files[0]; if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const wb=XLSX.read(ev.target.result,{type:"binary"});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+      const valid=rows.filter(r=>(r.name||"").trim());
+      if(!valid.length){alert("No valid rows found.");return;}
+      setRecipes(prev=>{
+        const map=new Map(prev.map(r=>[r.name.toLowerCase().trim(),r]));
+        valid.forEach(row=>{
+          const key=(row.name||"").toLowerCase().trim();
+          const tamil=(row.nameTamil||"").trim();
+          if(map.has(key)&&tamil){
+            const ex=map.get(key);
+            map.set(key,{...ex,nameTamil:tamil});
+          }
+        });
+        return Array.from(map.values());
+      });
+      alert(valid.length+" recipes processed.");
+    };
+    reader.readAsBinaryString(file);
+    e.target.value="";
+  };
+
   const translateRecipes=async()=>{
     const need=recipes.filter(x=>!x.nameTamil||!x.nameTamil.trim());
     if(!need.length){alert("All recipes already have Tamil names.");return;}
@@ -720,10 +750,9 @@ function RecsPage({ctx}){
         </label>
         <div style={{marginLeft:"auto",display:"flex",gap:6}}>
           <button style={css.btn("ghost",true)} onClick={()=>setModal({type:"recipeTypes"})}>⚙️ {t("Manage Types","வகை நிர்வகி")}</button>
-          <button style={{...css.btn("ghost",true),borderColor:P.purple,color:translating?P.muted:P.purple}}
-            onClick={translateRecipes} disabled={translating}>
-            {translating?"⏳ "+transProgress:"🔤 "+t("Translate Tamil","தமிழில் மொழிபெயர்")}
-          </button>
+          <button style={css.btn("ghost",true)} onClick={exportRecipes}>⬇️ {t("Export Names","பெயர் ஏற்று")}</button>
+          <button style={css.btn("success",true)} onClick={()=>recFileRef.current.click()}>📤 {t("Import Tamil","தமிழ் இறக்கு")}</button>
+          <input ref={recFileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importRecipesTamil}/>
           <button style={css.btn()} onClick={()=>setModal({type:"recipe"})}>+ {t("Add Recipe","சேர்")}</button>
         </div>
       </div>
