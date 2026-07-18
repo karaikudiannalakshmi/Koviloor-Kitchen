@@ -209,21 +209,22 @@ function applyScaling(baseQty,multiplier,factor,benchmark){
 const TODAY=new Date().toISOString().slice(0,10);
 
 // ── Print utility ──────────────────────────────────────────────────────────────
-function printHTML(title, htmlContent) {
+function printHTML(title, htmlContent, extraHead="") {
   const css=`
-    body{font-family:'Segoe UI',Arial,sans-serif;font-size:12px;color:#2c1a08;margin:20px;}
-    h2{font-size:15px;color:#5C2A0A;border-bottom:2px solid #E8821A;padding-bottom:6px;margin-bottom:10px;}
-    h3{font-size:13px;color:#8B4513;margin:14px 0 5px;}
-    h4{font-size:12px;color:#5C2A0A;margin:10px 0 3px;}
-    table{width:100%;border-collapse:collapse;margin-bottom:14px;}
-    th{background:#1C1410;color:#F5DEB3;padding:7px 10px;text-align:left;font-size:11px;}
-    td{padding:7px 10px;border-bottom:1px solid #f0d890;}
-    tr:nth-child(even) td{background:#fffbe8;}
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Tamil:wght@400;600;700&family=Noto+Sans:wght@400;600;700&display=swap');
+    body{font-family:'Noto Sans','Segoe UI',Arial,sans-serif;font-size:13px;color:#111;margin:20px;}
+    h2{font-size:16px;color:#111;border-bottom:2px solid #111;padding-bottom:6px;margin-bottom:10px;font-weight:700;}
+    h3{font-size:14px;color:#333;margin:14px 0 5px;font-weight:700;}
+    h4{font-size:13px;color:#333;margin:10px 0 3px;}
+    table{width:100%;border-collapse:collapse;margin-bottom:10px;}
+    th{background:#222;color:white;padding:6px 8px;text-align:left;font-size:12px;}
+    td{padding:4px 6px;border-bottom:1px solid #DDD;font-size:13px;}
+    tr:nth-child(even) td{background:#F5F5F5;}
     .hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
-    @media print{.no-print{display:none;}}
+    @media print{.no-print{display:none;}body{margin:10px;}@page{margin:15mm;}}
   `;
   const date=new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
-  const fullHtml='<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+title+'</title><style>'+css+'</style></head><body>'
+  const fullHtml='<!DOCTYPE html><html><head><meta charset="utf-8">'+extraHead+'<title>'+title+'</title><style>'+css+'</style></head><body>'
     +'<div class="hdr"><h2 style="border:none;margin:0">🍛 Koviloor Kitchen — '+title+'</h2>'
     +'<span style="font-size:11px;color:#9B7355">'+date+'</span></div>'
     +htmlContent+'</body></html>';
@@ -1629,13 +1630,14 @@ function OrderForm({ctx,ord,onClose}){
 function RepDish({ctx}){
   const {orders,recipes,ingredients,lang:gLang,setModal}=ctx;
   const [rLang,setRLang]=useState(gLang);
+  // Fix: fallback to English name if Tamil is blank
   const t=(en,ta)=>rLang==="en"?en:ta;
-  const n=(x)=>rLang==="en"?x.name:x.nameTamil;
+  const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
   const [dt,setDt]=useState(TODAY);
 
   const entries=orders.filter(o=>!o.isTemplate&&o.date===dt).flatMap(o=>o.entries.map(e=>({...e,_order:o})));
 
-  // grocery/spice/other first → vegetable → sub-recipes last
+  // Sort: grocery/spice=0, other=1, vegetable=2, sub=9
   const CAT_SORT={grocery:0,spice:0,other:1,cut:1,vegetable:2,sub:9};
   const sortIngs=(ings)=>[...ings].sort((a,b)=>{
     const ca=CAT_SORT[a.d.category]??1;
@@ -1643,24 +1645,6 @@ function RepDish({ctx}){
     if(ca!==cb)return ca-cb;
     return n(a.d).trim().localeCompare(n(b.d).trim());
   });
-
-  // B&W row style — tight name+qty, dot leader fills gap
-  const IngRow=({num,name,qty,unit,isSub,shade})=>(
-    <div style={{display:"flex",alignItems:"baseline",padding:"2px 4px",
-      background:shade?"#F5F5F5":"white",
-      borderBottom:"1px solid #E0E0E0",
-      borderLeft:isSub?"3px solid #555":"none"}}>
-      <span style={{fontSize:11,color:"#777",width:20,flexShrink:0,fontVariantNumeric:"tabular-nums"}}>{num}</span>
-      <span style={{fontSize:12,color:"#111",fontWeight:isSub?700:500,flex:1,overflow:"hidden",
-        whiteSpace:"nowrap",textOverflow:"clip",letterSpacing:"-0.01em"}}>
-        {name}{isSub?" *":""}
-      </span>
-      <span style={{fontSize:12,fontWeight:700,color:"#111",whiteSpace:"nowrap",
-        paddingLeft:4,borderBottom:"1px dotted #999",marginBottom:1,fontVariantNumeric:"tabular-nums"}}>
-        {qty.toFixed(3)} {unit}
-      </span>
-    </div>
-  );
 
   const sessData=SESSIONS.map(sess=>{
     const sessEntries=entries.filter(e=>e.session===sess);
@@ -1671,166 +1655,138 @@ function RepDish({ctx}){
       byRec[e.recId].totalMult+=e.qty/(rec.yield||1);
       byRec[e.recId].totalQty+=e.qty;
     });
-    const recs=Object.values(byRec).map(item=>({
-      ...item,
-      ings:sortIngs(mergeIngs(expandRecipeIngs(item.rec,item.totalMult,recipes,ingredients,false)))
-    }));
-
-    // Collect sub-recipes used across all main recipes in this session
-    const subMap={};
-    recs.forEach(({ings,totalMult,rec})=>{
-      ings.filter(r=>r.isSubRecipe).forEach(r=>{
-        const sid=r.d.id;
-        if(!subMap[sid])subMap[sid]={d:r.d,qty:0,unit:r.unit,subRec:recipes.find(x=>'sub_'+x.id===sid||x.name===r.d.name)};
-        subMap[sid].qty+=r.qty;
+    const recs=Object.values(byRec).map(item=>{
+      const ings=sortIngs(mergeIngs(expandRecipeIngs(item.rec,item.totalMult,recipes,ingredients,false)));
+      const subSections=ings.filter(r=>r.isSubRecipe).map(r=>{
+        const subRec=recipes.find(x=>x.name===r.d.name);
+        return{d:r.d,qty:r.qty,unit:r.unit,
+          ings:subRec?sortIngs(mergeIngs(expandRecipeIngs(subRec,r.qty/(subRec.yield||1),recipes,ingredients,false))):[]};
       });
+      return{...item,ings,subSections};
     });
-    const subSections=Object.values(subMap).map(s=>({
-      ...s,
-      ings:s.subRec?sortIngs(mergeIngs(expandRecipeIngs(s.subRec,s.qty/(s.subRec.yield||1),recipes,ingredients,false))):[]
-    }));
-
-    return {session:sess,recs,subSections};
+    return{session:sess,recs};
   }).filter(sd=>sd.recs.length>0);
 
   const hasData=sessData.length>0;
 
+  // Print font includes Noto Sans Tamil for Tamil rendering
+  const PRINT_FONTS='<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Tamil:wght@400;600;700&family=Noto+Sans:wght@400;600;700&display=swap"/>';
+
   const printSession=(sd)=>{
     let recNo=0;
-    const mainBlocks=sd.recs.map(({rec,totalQty,ings})=>{
+    const recBlocks=sd.recs.map(({rec,totalQty,ings,subSections})=>{
       recNo++;
       const ingRows=ings.map((r,i)=>{
         const isSub=r.isSubRecipe;
-        const name=n(r.d)+(isSub?" *":"");
-        return "<tr style='"+(isSub?"background:#F5F0FF":"")+"'>"
-          +"<td style='width:28px;color:#999;font-size:11px'>"+(i+1)+"</td>"
-          +"<td><strong>"+name+"</strong></td>"
-          +"<td style='text-align:right;font-weight:600;color:#E8821A'>"+r.qty.toFixed(3)+" "+r.unit+"</td>"
-          +"</tr>";
-      }).join("");
-      return "<div style='margin-bottom:18px'>"
-        +"<div style='display:flex;align-items:baseline;gap:10px;border-bottom:2px solid #5C2A0A;padding-bottom:4px;margin-bottom:6px'>"
-        +"<span style='font-size:13px;color:#9B7355;font-weight:600'>"+recNo+"</span>"
-        +"<span style='font-family:serif;font-size:15px;font-weight:700;color:#5C2A0A'>"+n(rec)+"</span>"
-        +"<span style='margin-left:auto;font-size:16px;font-weight:800;color:#E8821A'>"+totalQty.toFixed(3)+" "+rec.yieldUnit+"</span>"
-        +"</div>"
-        +(ings.length>0?"<table style='width:100%;border-collapse:collapse'><tbody>"+ingRows+"</tbody></table>":"")
-        +"</div>";
-    }).join("");
+        const name=n(r.d)+(isSub?' *':'');
+        return `<tr>
+          <td style="width:28px;text-align:right;padding:3px 6px 3px 0;color:#666;font-size:12px">${i+1}</td>
+          <td style="padding:3px 4px;font-size:13px;font-weight:${isSub?'700':'500'}">${name}</td>
+          <td style="padding:3px 0 3px 4px;text-align:right;font-size:13px;font-weight:700;white-space:nowrap">${r.qty.toFixed(3)} ${r.unit}</td>
+        </tr>`;
+      }).join('');
 
-    const subBlocks=sd.subSections.map(({d,qty,unit,ings})=>{
-      recNo++;
-      const ingRows=ings.map((r,i)=>
-        "<tr><td style='width:28px;color:#999;font-size:11px'>"+(i+1)+"</td>"
-        +"<td><strong>"+n(r.d)+"</strong></td>"
-        +"<td style='text-align:right;font-weight:600;color:#E8821A'>"+r.qty.toFixed(3)+" "+r.unit+"</td></tr>"
-      ).join("");
-      return "<div style='margin-bottom:18px;background:#FAFAFA;padding:8px;border-left:3px solid #6B3FA0'>"
-        +"<div style='display:flex;align-items:baseline;gap:10px;border-bottom:1px solid #C4B5FD;padding-bottom:4px;margin-bottom:6px'>"
-        +"<span style='font-size:13px;color:#9B7355;font-weight:600'>"+recNo+"</span>"
-        +"<span style='font-family:serif;font-size:15px;font-weight:700;color:#6B3FA0'>"+n(d)+" *</span>"
-        +"<span style='margin-left:auto;font-size:16px;font-weight:800;color:#6B3FA0'>"+qty.toFixed(3)+" "+unit+"</span>"
-        +"</div>"
-        +(ings.length>0?"<table style='width:100%;border-collapse:collapse'><tbody>"+ingRows+"</tbody></table>":"")
-        +"</div>";
-    }).join("");
+      const subBlocks=(subSections||[]).map(({d,qty,unit,ings:sings})=>{
+        recNo++;
+        const srows=sings.map((r,i)=>`<tr>
+          <td style="width:28px;text-align:right;padding:3px 6px 3px 0;color:#666;font-size:12px">${i+1}</td>
+          <td style="padding:3px 4px;font-size:13px;font-weight:500">${n(r.d)}</td>
+          <td style="padding:3px 0 3px 4px;text-align:right;font-size:13px;font-weight:700;white-space:nowrap">${r.qty.toFixed(3)} ${r.unit}</td>
+        </tr>`).join('');
+        return `<div style="margin:8px 0 10px 24px;border-left:2px solid #999;padding-left:10px">
+          <div style="display:flex;align-items:baseline;border-bottom:1px solid #BBB;padding-bottom:3px;margin-bottom:4px">
+            <span style="font-size:14px;font-weight:700;flex:1">${n(d)} *</span>
+            <span style="font-size:15px;font-weight:800">${qty.toFixed(3)} ${unit}</span>
+          </div>
+          ${sings.length?`<table style="width:100%;border-collapse:collapse"><tbody>${srows}</tbody></table>`:''}
+        </div>`;
+      }).join('');
 
-    printHTML(sd.session+" — "+t("Dish-wise Ingredients","சமையல் வாரியாக பொருட்கள்")+" ("+dt+")",
-      "<h2 style='border:none;margin:0 0 4px'>"+sd.session+"</h2>"
-      +"<p style='color:#9B7355;margin:0 0 14px;font-size:12px'>"+t("Date","தேதி")+": "+dt+"</p>"
-      +mainBlocks
-      +(subBlocks?"<h3 style='color:#6B3FA0;border-top:2px solid #6B3FA0;padding-top:8px;margin-top:4px'>"+t("Sub-Recipe Breakdowns","துணை சமையல் விவரம்")+"</h3>"+subBlocks:""));
+      return `<div style="margin-bottom:22px;page-break-inside:avoid">
+        <div style="display:flex;align-items:baseline;border-bottom:2px solid #000;padding-bottom:5px;margin-bottom:6px">
+          <span style="font-size:13px;font-weight:600;color:#555;margin-right:6px">${recNo}</span>
+          <span style="font-size:16px;font-weight:700;flex:1">${n(rec)}</span>
+          <span style="font-size:18px;font-weight:800">${totalQty.toFixed(3)} ${rec.yieldUnit}</span>
+        </div>
+        ${ings.length?`<table style="width:100%;border-collapse:collapse"><tbody>${ingRows}</tbody></table>`:''}
+        ${subBlocks}
+      </div>`;
+    }).join('');
+
+    printHTML(
+      sd.session+' — '+t('Dish-wise Ingredients','சமையல் வாரியாக பொருட்கள்')+' ('+dt+')',
+      `<p style="font-size:12px;color:#555;margin:0 0 16px">${t('Date','தேதி')}: ${dt}</p>${recBlocks}`,
+      PRINT_FONTS
+    );
   };
 
   const exportSession=(sd)=>{
     const rows=[];
-    sd.recs.forEach(({rec,totalQty,ings})=>{
-      rows.push({"Recipe / Ingredient":"▶ "+n(rec)+" ("+totalQty.toFixed(3)+" "+rec.yieldUnit+")",Category:"",Quantity:"",Unit:""});
-      ings.forEach(r=>rows.push({
-        "Recipe / Ingredient":"  "+(r.isSubRecipe?"* ":"")+n(r.d),
-        Category:r.d.category, Quantity:+r.qty.toFixed(3), Unit:r.unit,
-      }));
-      rows.push({"Recipe / Ingredient":"",Category:"",Quantity:"",Unit:""});
-    });
-    if(sd.subSections.length>0){
-      rows.push({"Recipe / Ingredient":"— Sub-Recipe Breakdowns —",Category:"",Quantity:"",Unit:""});
-      sd.subSections.forEach(({d,qty,unit,ings})=>{
-        rows.push({"Recipe / Ingredient":"▶ * "+n(d)+" ("+qty.toFixed(3)+" "+unit+")",Category:"",Quantity:"",Unit:""});
-        ings.forEach(r=>rows.push({"Recipe / Ingredient":"  "+n(r.d),Category:r.d.category,Quantity:+r.qty.toFixed(3),Unit:r.unit}));
-        rows.push({"Recipe / Ingredient":"",Category:"",Quantity:"",Unit:""});
+    sd.recs.forEach(({rec,totalQty,ings,subSections})=>{
+      rows.push({[t('Recipe','சமையல்')]:'▶ '+n(rec)+' ('+totalQty.toFixed(3)+' '+rec.yieldUnit+')',Quantity:'',Unit:''});
+      ings.forEach(r=>rows.push({[t('Recipe','சமையல்')]:'  '+(r.isSubRecipe?'* ':'')+n(r.d),Quantity:+r.qty.toFixed(3),Unit:r.unit}));
+      (subSections||[]).forEach(({d,qty,unit,ings:sings})=>{
+        rows.push({[t('Recipe','சமையல்')]:'  ▶ * '+n(d)+' ('+qty.toFixed(3)+' '+unit+')',Quantity:'',Unit:''});
+        sings.forEach(r=>rows.push({[t('Recipe','சமையல்')]:'    '+n(r.d),Quantity:+r.qty.toFixed(3),Unit:r.unit}));
       });
-    }
-    exportXlsxSheets("dish_ingredients_"+sd.session+"_"+dt+".xlsx",[{name:sd.session.slice(0,31),data:rows}]);
+      rows.push({[t('Recipe','சமையல்')]:'',Quantity:'',Unit:''});
+    });
+    exportXlsxSheets('dish_ingredients_'+sd.session+'_'+dt+'.xlsx',[{name:sd.session.slice(0,31),data:rows}]);
   };
+
+  // Ingredient row — screen display
+  const IngRow=({num,name,qty,unit,isSub,shade})=>(
+    <div style={{display:'flex',alignItems:'baseline',padding:'3px 6px',
+      background:shade?'#F5F5F5':'white',borderBottom:'1px solid #E8E8E8',
+      borderLeft:isSub?'3px solid #444':'none'}}>
+      <span style={{fontSize:11,color:'#888',width:22,flexShrink:0,textAlign:'right',marginRight:8}}>{num}</span>
+      <span style={{fontSize:13,fontWeight:isSub?700:500,color:'#111',flex:1}}>{name}{isSub?' *':''}</span>
+      <span style={{fontSize:13,fontWeight:700,color:'#111',whiteSpace:'nowrap',paddingLeft:12}}>{qty.toFixed(3)} {unit}</span>
+    </div>
+  );
 
   return(
     <div>
       <ReportBar onPrint={null} onExport={null} lang={rLang} setLang={setRLang}>
-        <div><label style={css.lbl}>{t("Date","தேதி")}</label><input type="date" style={{...css.inp,width:160}} value={dt} onChange={e=>setDt(e.target.value)}/></div>
-        {entries.length>0&&<button style={css.btn("info",true)} onClick={()=>setModal({type:"postIssues",date:dt})}>📦 {t("Post Issues","சரக்கு போடு")}</button>}
+        <div><label style={css.lbl}>{t('Date','தேதி')}</label><input type="date" style={{...css.inp,width:160}} value={dt} onChange={e=>setDt(e.target.value)}/></div>
+        {entries.length>0&&<button style={css.btn('info',true)} onClick={()=>setModal({type:'postIssues',date:dt})}>📦 {t('Post Issues','சரக்கு போடு')}</button>}
       </ReportBar>
-      {!hasData&&<div style={{color:P.muted,textAlign:"center",padding:24}}>{t("No orders for this date.","இந்த தேதியில் ஆர்டர் இல்லை.")}</div>}
+      {!hasData&&<div style={{color:P.muted,textAlign:'center',padding:24}}>{t('No orders for this date.','இந்த தேதியில் ஆர்டர் இல்லை.')}</div>}
       {sessData.map(sd=>(
-        <div key={sd.session} style={{...css.card,marginBottom:16,border:"1px solid #333"}}>
-          {/* Session header */}
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:8}}>
-            <div style={{display:"flex",alignItems:"center",gap:10}}>
-              <span style={{background:"#222",color:"white",fontWeight:700,fontSize:14,padding:"5px 16px",borderRadius:6}}>{sd.session}</span>
-              <span style={{fontSize:12,color:"#555"}}>{dt}</span>
+        <div key={sd.session} style={{...css.card,marginBottom:16,border:'1px solid #333'}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14,flexWrap:'wrap',gap:8}}>
+            <div style={{display:'flex',alignItems:'center',gap:10}}>
+              <span style={{background:'#222',color:'white',fontWeight:700,fontSize:14,padding:'5px 16px',borderRadius:6}}>{sd.session}</span>
+              <span style={{fontSize:12,color:'#555'}}>{dt}</span>
             </div>
-            <div style={{display:"flex",gap:6}}>
-              <button style={css.btn("ghost",true)} onClick={()=>exportSession(sd)}>📥 {t("Excel","எக்செல்")}</button>
-              <button style={css.btn("primary",true)} onClick={()=>printSession(sd)}>🖨 {t("Print","அச்சு")}</button>
+            <div style={{display:'flex',gap:6}}>
+              <button style={css.btn('ghost',true)} onClick={()=>exportSession(sd)}>📥 {t('Excel','எக்செல்')}</button>
+              <button style={css.btn('primary',true)} onClick={()=>printSession(sd)}>🖨 {t('Print','அச்சு')}</button>
             </div>
           </div>
-
-          {/* Main recipes */}
-          {sd.recs.map(({rec,totalQty,ings},ri)=>(
-            <div key={rec.id} style={{marginBottom:16,borderBottom:"1px solid #DDD",paddingBottom:12}}>
-              {/* Recipe header — B&W, quantity prominent */}
-              <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:6,
-                borderBottom:"2px solid #222",paddingBottom:4}}>
-                <span style={{fontSize:11,color:"#777",fontWeight:600,minWidth:20}}>{ri+1}</span>
-                <span style={{fontFamily:"'Playfair Display',serif",fontSize:14,fontWeight:700,color:"#111",flex:1}}>{n(rec)}</span>
-                <span style={{fontSize:17,fontWeight:800,color:"#111",whiteSpace:"nowrap",
-                  background:"#111",color:"white",padding:"1px 8px",borderRadius:4}}>
-                  {totalQty.toFixed(3)} {rec.yieldUnit}
-                </span>
+          {sd.recs.map(({rec,totalQty,ings,subSections},ri)=>(
+            <div key={rec.id} style={{marginBottom:20}}>
+              <div style={{display:'flex',alignItems:'baseline',gap:8,borderBottom:'2px solid #111',paddingBottom:5,marginBottom:6}}>
+                <span style={{fontSize:11,color:'#777',fontWeight:600,minWidth:20}}>{ri+1}</span>
+                <span style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:'#111',flex:1}}>{n(rec)}</span>
+                <span style={{fontSize:18,fontWeight:800,color:'#111',whiteSpace:'nowrap'}}>{totalQty.toFixed(3)} {rec.yieldUnit}</span>
               </div>
-              {/* Ingredients sorted: grocery→vegetable→sub */}
-              <div style={{border:"1px solid #DDD",borderRadius:4,overflow:"hidden"}}>
-                {ings.map((row,i)=>(
-                  <IngRow key={row.d.id} num={i+1} name={n(row.d)}
-                    qty={row.qty} unit={row.unit} isSub={row.isSubRecipe} shade={i%2===1}/>
-                ))}
+              <div style={{border:'1px solid #DDD',borderRadius:4,overflow:'hidden',marginBottom:subSections&&subSections.length?6:0}}>
+                {ings.map((row,i)=><IngRow key={row.d.id} num={i+1} name={n(row.d)} qty={row.qty} unit={row.unit} isSub={row.isSubRecipe} shade={i%2===1}/>)}
               </div>
-            </div>
-          ))}
-
-          {/* Sub-recipe breakdowns */}
-          {sd.subSections.length>0&&(
-            <div style={{marginTop:8}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#333",textTransform:"uppercase",letterSpacing:1,marginBottom:8,paddingTop:6,borderTop:"2px solid #333"}}>
-                {t("Sub-Recipe Breakdowns","துணை சமையல் விவரம்")}
-              </div>
-              {sd.subSections.map(({d,qty,unit,ings},si)=>(
-                <div key={d.id} style={{marginBottom:14,background:"#FAFAFA",borderLeft:"3px solid #333",borderRadius:"0 6px 6px 0",padding:"8px 12px"}}>
-                  <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:6,
-                    borderBottom:"1px solid #555",paddingBottom:3}}>
-                    <span style={{fontFamily:"'Playfair Display',serif",fontSize:13,fontWeight:700,color:"#111",flex:1}}>{n(d)} *</span>
-                    <span style={{fontSize:15,fontWeight:800,color:"white",background:"#555",
-                      padding:"1px 8px",borderRadius:4,whiteSpace:"nowrap"}}>{qty.toFixed(3)} {unit}</span>
+              {(subSections||[]).map(({d,qty,unit,ings:sings})=>(
+                <div key={d.id} style={{marginBottom:6,marginLeft:20,borderLeft:'2px solid #888',padding:'6px 10px',background:'#FAFAFA',borderRadius:'0 4px 4px 0'}}>
+                  <div style={{display:'flex',alignItems:'baseline',gap:8,borderBottom:'1px solid #AAA',paddingBottom:3,marginBottom:4}}>
+                    <span style={{fontSize:13,fontWeight:700,flex:1}}>{n(d)} *</span>
+                    <span style={{fontSize:14,fontWeight:800,whiteSpace:'nowrap'}}>{qty.toFixed(3)} {unit}</span>
                   </div>
-                  <div style={{border:"1px solid #DDD",borderRadius:4,overflow:"hidden"}}>
-                    {ings.map((row,i)=>(
-                      <IngRow key={row.d.id} num={i+1} name={n(row.d)}
-                        qty={row.qty} unit={row.unit} isSub={false} shade={i%2===1}/>
-                    ))}
+                  <div style={{border:'1px solid #DDD',borderRadius:4,overflow:'hidden'}}>
+                    {sings.map((row,i)=><IngRow key={row.d.id} num={i+1} name={n(row.d)} qty={row.qty} unit={row.unit} isSub={false} shade={i%2===1}/>)}
                   </div>
                 </div>
               ))}
             </div>
-          )}
+          ))}
         </div>
       ))}
     </div>
@@ -1841,7 +1797,7 @@ function RepIng({ctx}){
   const {orders,recipes,ingredients,lang:gLang}=ctx;
   const [rLang,setRLang]=useState(gLang);
   const t=(en,ta)=>rLang==="en"?en:ta;
-  const n=(x)=>rLang==="en"?x.name:x.nameTamil;
+  const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
   const [dt,setDt]=useState(TODAY);
 
   const entries=orders.filter(o=>!o.isTemplate&&o.date===dt).flatMap(o=>o.entries.map(e=>({...e,_order:o})));
@@ -1954,7 +1910,7 @@ function RepShop({ctx}){
   const {orders,recipes,ingredients,inventory,lang:gLang}=ctx;
   const [rLang,setRLang]=useState(gLang);
   const t=(en,ta)=>rLang==="en"?en:ta;
-  const n=(x)=>rLang==="en"?x.name:x.nameTamil;
+  const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
   const [dates,setDates]=useState([TODAY]);
 
   const addDate=()=>{if(dates.length<7)setDates(d=>[...d,TODAY]);};
@@ -2179,7 +2135,7 @@ function RepDel({ctx}){
   const {orders,recipes,locations,lang:gLang}=ctx;
   const [rLang,setRLang]=useState(gLang);
   const t=(en,ta)=>rLang==="en"?en:ta;
-  const n=(x)=>rLang==="en"?x.name:x.nameTamil;
+  const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
   const [dt,setDt]=useState(TODAY);
   const [sessF,setSessF]=useState("All");
   const [locF,setLocF]=useState("all");
@@ -2318,7 +2274,7 @@ function RepCol({ctx}){
   const {orders,recipes,locations,lang:gLang}=ctx;
   const [rLang,setRLang]=useState(gLang);
   const t=(en,ta)=>rLang==="en"?en:ta;
-  const n=(x)=>rLang==="en"?x.name:x.nameTamil;
+  const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
   const [dt,setDt]=useState(TODAY);
   const [sessF,setSessF]=useState("All");
 
@@ -2405,7 +2361,7 @@ function RepCost({ctx}){
   const {recipes,ingredients,recipeTypes,lang:gLang}=ctx;
   const [rLang,setRLang]=useState(gLang);
   const t=(en,ta)=>rLang==="en"?en:ta;
-  const n=(x)=>rLang==="en"?x.name:x.nameTamil;
+  const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
   const [drillId,setDrillId]=useState(null);
 
   const getType=(r)=>{
