@@ -840,7 +840,7 @@ function RecsPage({ctx}){
         </table>
         </div>
       ))}
-      <div style={{fontSize:11,color:P.muted,marginTop:4}}>{vis.length} {t("recipe(s) shown","சமையல்கள் காட்டப்படுகின்றன")} — {t("click name to view / edit details","பெயரை சொடுக்கி விவரம் காண்க")}</div>
+      <div style={{fontSize:11,color:P.muted,marginTop:4}}>{mainRecs.length+subRecs.length} {t("recipe(s) shown","சமையல்கள் காட்டப்படுகின்றன")} — {t("click name to view / edit details","பெயரை சொடுக்கி விவரம் காண்க")}</div>
     </div>
   );
 }
