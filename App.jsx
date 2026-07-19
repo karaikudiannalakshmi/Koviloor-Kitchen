@@ -212,16 +212,23 @@ const TODAY=new Date().toISOString().slice(0,10);
 function printHTML(title, htmlContent, extraHead="") {
   const css=`
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Tamil:wght@400;600;700&family=Noto+Sans:wght@400;600;700&display=swap');
-    body{font-family:'Noto Sans','Segoe UI',Arial,sans-serif;font-size:13px;color:#111;margin:20px;}
-    h2{font-size:16px;color:#111;border-bottom:2px solid #111;padding-bottom:6px;margin-bottom:10px;font-weight:700;}
-    h3{font-size:14px;color:#333;margin:14px 0 5px;font-weight:700;}
-    h4{font-size:13px;color:#333;margin:10px 0 3px;}
+    *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    body{font-family:'Noto Sans','Segoe UI',Arial,sans-serif;font-size:13px;color:#000;margin:20px;}
+    h2{font-size:16px;color:#000;border-bottom:2px solid #000;padding-bottom:5px;margin-bottom:10px;font-weight:700;}
+    h3{font-size:14px;color:#000;margin:14px 0 5px;font-weight:700;border-bottom:1px solid #000;padding-bottom:3px;}
+    h4{font-size:13px;color:#000;margin:10px 0 3px;font-weight:600;}
     table{width:100%;border-collapse:collapse;margin-bottom:10px;}
-    th{background:#222;color:white;padding:6px 8px;text-align:left;font-size:12px;}
-    td{padding:4px 6px;border-bottom:1px solid #DDD;font-size:13px;}
-    tr:nth-child(even) td{background:#F5F5F5;}
+    th{background:#000;color:#fff;padding:5px 8px;text-align:left;font-size:12px;font-weight:700;}
+    td{padding:3px 6px;border-bottom:1px solid #BBB;font-size:13px;}
+    tr:nth-child(even) td{background:#F0F0F0;}
     .hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
-    @media print{.no-print{display:none;}body{margin:10px;}@page{margin:15mm;}}
+    @media print{
+      .no-print{display:none;}
+      body{margin:5mm;}
+      @page{margin:12mm;size:A4;}
+      table{page-break-inside:avoid;}
+      div{page-break-inside:avoid;}
+    }
   `;
   const date=new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
   const fullHtml='<!DOCTYPE html><html><head><meta charset="utf-8">'+extraHead+'<title>'+title+'</title><style>'+css+'</style></head><body>'
@@ -302,12 +309,14 @@ const INV0={
 
 // ── Expand a recipe's raw ingredients recursively via subLinks ────────────────
 // mainMult = how many times the base recipe is being made
-function expandRecipeIngs(rec, mainMult, recipes, ingredients, expandSubs=true) {
-  // expandSubs=false: sub-recipes shown as single line items (dish-wise report)
-  // expandSubs=true:  sub-recipes expanded into raw ingredients (shopping list, cost)
+function expandRecipeIngs(rec, mainMult, recipes, ingredients, expandSubs=true, _visited=new Set()) {
+  // Guard against circular sub-recipe references
+  if (_visited.has(rec.id)) return [];
+  const visited = new Set(_visited); visited.add(rec.id);
+
   const result = [];
 
-  // 1. Always show direct ingredients
+  // 1. Direct ingredients
   (rec.ingredients||[]).forEach(ing => {
     const d = ingredients.find(x => x.id === ing.iid); if (!d) return;
     const scaled = applyScaling(ing.qty, mainMult, d.scalingFactor, d.scalingBenchmark);
@@ -319,16 +328,14 @@ function expandRecipeIngs(rec, mainMult, recipes, ingredients, expandSubs=true) 
     const sub = recipes.find(r => r.id === link.subId); if (!sub) return;
     const scaledQty = link.qty * mainMult;
     if (!expandSubs) {
-      // Show sub-recipe as a single virtual ingredient line
       const virtualIng = {
         id: 'sub_'+sub.id, name: sub.name, nameTamil: sub.nameTamil||sub.name,
         category: 'sub', unit: sub.yieldUnit||link.unit, normCost: 0, isSubRecipe: true,
       };
       result.push({ d: virtualIng, qty: +scaledQty.toFixed(4), unit: sub.yieldUnit||link.unit, isSubRecipe: true });
     } else {
-      // Fully expand sub-recipe into raw ingredients
       const subMult = scaledQty / (sub.yield || 1);
-      expandRecipeIngs(sub, subMult, recipes, ingredients, true).forEach(si => result.push(si));
+      expandRecipeIngs(sub, subMult, recipes, ingredients, true, visited).forEach(si => result.push(si));
     }
   });
   return result;
@@ -2144,19 +2151,19 @@ function RepShop({ctx}){
                   const tb=Math.max(0,tot-stk);
                   const cells=sortedDates.map(dt=>{const v=byDate[dt][ing.id];return"<td style='text-align:right'>"+(v?v.qty.toFixed(2)+" "+v.unit:"—")+"</td>";}).join("");
                   return"<tr><td><strong>"+n(ing)+"</strong></td>"+cells
-                    +"<td style='text-align:right;background:#fffbe8'><strong>"+tot.toFixed(2)+" "+unit+"</strong></td>"
+                    +"<td style='text-align:right;font-weight:700'>"+tot.toFixed(2)+" "+unit+"</td>"
                     +"<td style='text-align:right'>"+stk.toFixed(2)+" "+unit+"</td>"
-                    +"<td style='text-align:right;color:"+(tb>0?"#C0392B":"#1A7A40")+"'><strong>"+(tb>0?tb.toFixed(2)+" "+unit:"✓ OK")+"</strong></td></tr>";
+                    +"<td style='text-align:right;font-weight:700'>"+(tb>0?tb.toFixed(2)+" "+unit:"✓")+"</td></tr>";
                 }).join("");
-                return"<h3>"+CATICON[cat]+" "+CATLABEL[cat]+"</h3>"
+                return"<h3>"+CATLABEL[cat]+"</h3>"
                   +"<table><thead><tr><th>"+t("Ingredient","பொருள்")+"</th>"+dateCols
                   +"<th style='text-align:right'>"+t("Total","மொத்தம்")+"</th>"
                   +"<th style='text-align:right'>"+t("In Stock","கையிருப்பு")+"</th>"
-                  +"<th style='text-align:right'>"+t("To Buy","வாங்க")+"</th>"
+                  +"<th style='text-align:right;'>"+t("To Buy","வாங்க")+"</th>"
                   +"</tr></thead><tbody>"+rows+"</tbody></table>";
               }).join("");
               const label=activeTab==="All"?t("All Sessions","அனைத்து அமர்வு"):activeTab;
-              printHTML("Shopping List — "+label+" ("+sortedDates.join(", ")+")",
+              printHTML(t("Shopping List","கொள்முதல் பட்டியல்")+" — "+label+" ("+sortedDates.join(", ")+")",
                 "<p style='color:#9B7355;margin:0 0 12px;font-size:12px'>"+t("Session","அமர்வு")+": "+label+" | "+t("Dates","தேதிகள்")+": "+sortedDates.join(" · ")+"</p>"+catBlocks);
             }}>🖨 {t("Print","அச்சு")}</button>
           </div>
@@ -2607,7 +2614,7 @@ function RepCost({ctx}){
                           <td style={css.td}><strong>{rLang==="en"?row.d.name:row.d.nameTamil}</strong></td>
                           <td style={css.td}><span style={css.badge(ccol)}>{row.d.category}</span></td>
                           <td style={{...css.td,textAlign:"right"}}>{row.qty.toFixed(2)} {row.unit}</td>
-                          <td style={{...css.td,textAlign:"right",fontSize:11,color:P.muted}}>{row.d.normCost?("₹"+row.d.normCost+"/"+row.unit):"—"}</td>
+                          <td style={{...css.td,textAlign:"right",fontSize:11,color:row.d.normCost?P.muted:"#FCA5A5"}}>{row.d.normCost?("₹"+row.d.normCost+"/"+row.unit):"no cost set"}</td>
                           <td style={{...css.td,textAlign:"right"}}>{row.lineCost>0?<strong style={{color:P.success}}>₹{row.lineCost.toFixed(2)}</strong>:<span style={{color:"#CCC"}}>—</span>}</td>
                           <td style={{...css.td,textAlign:"right",fontSize:10,color:P.muted}}>{pct>0?pct.toFixed(1)+"%":"—"}</td>
                         </tr>
