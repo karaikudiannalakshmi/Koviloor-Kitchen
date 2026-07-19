@@ -574,7 +574,14 @@ function IngsPage({ctx}){
   const visible=cat==="all"?ingredients:ingredients.filter(i=>i.category===cat);
 
   const saveEdit=()=>{
-    setIngredients(p=>p.map(i=>i.id===editId?{...ef,normCost:ef.normCost?+ef.normCost:undefined,cutYield:ef.cutYield?+ef.cutYield:undefined,scalingFactor:ef.scalingFactor?+ef.scalingFactor:undefined,scalingBenchmark:ef.scalingBenchmark?+ef.scalingBenchmark:undefined}:i));
+    const updated={...ef};
+    // Convert numeric fields — omit (don't set to undefined) if blank
+    updated.normCost = ef.normCost ? +ef.normCost : 0;
+    if(ef.cutYield) updated.cutYield=+ef.cutYield; else delete updated.cutYield;
+    if(ef.cutUnit) updated.cutUnit=ef.cutUnit; else delete updated.cutUnit;
+    if(ef.scalingFactor) updated.scalingFactor=+ef.scalingFactor; else delete updated.scalingFactor;
+    if(ef.scalingBenchmark) updated.scalingBenchmark=+ef.scalingBenchmark; else delete updated.scalingBenchmark;
+    setIngredients(p=>p.map(i=>i.id===editId?updated:i));
     setEditId(null);
   };
   const addNew=()=>{
