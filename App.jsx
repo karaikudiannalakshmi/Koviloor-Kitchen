@@ -1762,13 +1762,29 @@ function RepDish({ctx}){
       byRec[e.recId].totalMult+=e.qty/(rec.yield||1);
       byRec[e.recId].totalQty+=e.qty;
     });
+    const recByNameLC=new Map(recipes.map(r=>[r.name.toLowerCase().trim(),r]));
     const recs=Object.values(byRec).map(item=>{
-      const ings=sortIngs(mergeIngs(expandRecipeIngs(item.rec,item.totalMult,recipes,ingredients,false)));
-      // Sub-recipes for THIS recipe
-      const subSections=ings.filter(r=>r.isSubRecipe).map(r=>{
-        const subRec=recipes.find(x=>x.name===r.d.name);
-        return{d:r.d,qty:r.qty,unit:r.unit,
-          ings:subRec?sortIngs(mergeIngs(expandRecipeIngs(subRec,r.qty/(subRec.yield||1),recipes,ingredients,false))):[]};
+      const rawIngs=sortIngs(mergeIngs(expandRecipeIngs(item.rec,item.totalMult,recipes,ingredients,false)));
+      // Detect sub-recipes: either marked isSubRecipe OR ingredient name matches a recipe
+      const subSections=[];
+      const seen=new Set();
+      rawIngs.forEach(r=>{
+        const matchRec=r.isSubRecipe
+          ?recipes.find(x=>x.name===r.d.name)
+          :recByNameLC.get(r.d.name.toLowerCase().trim());
+        if(matchRec&&!seen.has(matchRec.id)){
+          seen.add(matchRec.id);
+          subSections.push({
+            d:{...r.d,name:matchRec.name,nameTamil:matchRec.nameTamil||r.d.nameTamil,isSubRecipe:true},
+            qty:r.qty,unit:r.unit,
+            ings:sortIngs(mergeIngs(expandRecipeIngs(matchRec,r.qty/(matchRec.yield||1),recipes,ingredients,false)))
+          });
+        }
+      });
+      // Mark ingredient rows that are sub-recipes
+      const ings=rawIngs.map(r=>{
+        const isS=r.isSubRecipe||recByNameLC.has(r.d.name.toLowerCase().trim());
+        return isS?{...r,isSubRecipe:true,d:{...r.d,isSubRecipe:true}}:r;
       });
       return{...item,ings,subSections};
     });
