@@ -1791,7 +1791,9 @@ function RepDish({ctx}){
     return{session:sess,recs};
   }).filter(sd=>sd.recs.length>0);
 
-  const hasData=sessData.length>0;
+  const [activeSess,setActiveSess]=useState("All");
+  const visibleSess=activeSess==="All"?sessData:sessData.filter(sd=>sd.session===activeSess);
+  const hasData=visibleSess.length>0;
 
   // Print font includes Noto Sans Tamil for Tamil rendering
   const PRINT_FONTS='<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Tamil:wght@400;600;700&family=Noto+Sans:wght@400;600;700&display=swap"/>';
@@ -1875,8 +1877,26 @@ function RepDish({ctx}){
         <div><label style={css.lbl}>{t('Date','தேதி')}</label><input type="date" style={{...css.inp,width:160}} value={dt} onChange={e=>setDt(e.target.value)}/></div>
         {entries.length>0&&<button style={css.btn('info',true)} onClick={()=>setModal({type:'postIssues',date:dt})}>📦 {t('Post Issues','சரக்கு போடு')}</button>}
       </ReportBar>
+      {/* Session filter tabs */}
+      <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}}>
+        {["All",...SESSIONS].map(s=>{
+          const hasOrders=s==="All"?sessData.length>0:sessData.some(sd=>sd.session===s);
+          if(!hasOrders&&s!=="All")return null;
+          return(
+            <button key={s} style={{
+              ...css.btn(activeSess===s?"primary":"ghost",true),
+              borderColor:s!=="All"?(SCOLOR[s]||P.muted):"#DCC88A",
+              color:activeSess===s?"white":(s!=="All"?SCOLOR[s]:P.deepBrown),
+              background:activeSess===s?(s!=="All"?(SCOLOR[s]||P.saffron):P.saffron):"transparent",
+              fontWeight:activeSess===s?700:400,
+            }} onClick={()=>setActiveSess(s)}>
+              {s==="All"?t("All Sessions","அனைத்து"):s}
+            </button>
+          );
+        })}
+      </div>
       {!hasData&&<div style={{color:P.muted,textAlign:'center',padding:24}}>{t('No orders for this date.','இந்த தேதியில் ஆர்டர் இல்லை.')}</div>}
-      {sessData.map(sd=>(
+      {visibleSess.map(sd=>(
         <div key={sd.session} style={{...css.card,marginBottom:16,border:'1px solid #333'}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14,flexWrap:'wrap',gap:8}}>
             <div style={{display:'flex',alignItems:'center',gap:10}}>
