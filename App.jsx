@@ -2153,7 +2153,7 @@ function RepShop({ctx}){
 
   // Active session tab
   const [activeTab,setActiveTab]=useState("All");
-  const {byDate,combined,allIngs}=useMemo(()=>buildData(activeTab),[activeTab,dates,orders,recipes,ingredients]);
+  const {byDate,combined,allIngs}=useMemo(()=>buildData(activeTab),[activeTab,sortedDates,orders,recipes,ingredients]);
   const hasData=allIngs.length>0;
 
   return(
