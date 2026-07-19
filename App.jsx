@@ -674,7 +674,6 @@ function IngsPage({ctx}){
 function RecsPage({ctx}){
   const {recipes,setRecipes,ingredients,recipeTypes,lang,setModal}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
-  const [showSub,setShowSub]=useState(false);
   const [q,setQ]=useState("");
   const [typeF,setTypeF]=useState("all");
   const [translating,setTranslating]=useState(false);
@@ -745,13 +744,13 @@ function RecsPage({ctx}){
     alert("Done! Translated "+Object.keys(results).length+" recipes.");
   };
 
-  const vis=recipes
-    .filter(r=>showSub||!r.isSubRecipe)
-    .filter(r=>typeF==="all"||r.recipeType===typeF)
-    .filter(r=>{
-      const qq=q.toLowerCase();
-      return !qq||r.name.toLowerCase().includes(qq)||r.nameTamil.includes(q);
-    });
+  const filterFn=r=>{
+    if(typeF!=="all"&&r.recipeType!==typeF) return false;
+    const qq=q.toLowerCase();
+    return !qq||r.name.toLowerCase().includes(qq)||(r.nameTamil||"").toLowerCase().includes(qq);
+  };
+  const mainRecs = recipes.filter(r=>!r.isSubRecipe).filter(filterFn);
+  const subRecs  = recipes.filter(r=>r.isSubRecipe).filter(filterFn);
 
   const usedTypes=[...new Set(recipes.map(r=>r.recipeType).filter(Boolean))];
 
@@ -759,10 +758,7 @@ function RecsPage({ctx}){
     <div>
       <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"center",flexWrap:"wrap"}}>
         <input style={{...css.inp,maxWidth:220}} placeholder={t("Search recipes...","தேடு...")} value={q} onChange={e=>setQ(e.target.value)}/>
-        <label style={{display:"flex",alignItems:"center",gap:5,fontSize:12,cursor:"pointer",whiteSpace:"nowrap"}}>
-          <input type="checkbox" checked={showSub} onChange={e=>setShowSub(e.target.checked)}/>
-          {t("Include Sub-Recipes","துணை காட்டு")}
-        </label>
+        
         <div style={{marginLeft:"auto",display:"flex",gap:6}}>
           <button style={css.btn("ghost",true)} onClick={()=>setModal({type:"recipeTypes"})}>⚙️ {t("Manage Types","வகை நிர்வகி")}</button>
           <button style={css.btn("ghost",true)} onClick={exportRecipes}>⬇️ {t("Export Names","பெயர் ஏற்று")}</button>
@@ -781,8 +777,15 @@ function RecsPage({ctx}){
         <span style={{width:10,height:10,background:"#2563EB",borderRadius:2,display:"inline-block",flexShrink:0}}/>
         {t("Blue rows have no ingredients — click to edit","நீல வரிசைகளில் பொருட்கள் இல்லை — திருத்த கிளிக்")}
       </div>
-      <div style={{...css.card,padding:0,overflow:"hidden"}}>
-        <table style={css.table}>
+      {([
+          {label:t("Recipes","சமையல் குறிப்புகள்"),list:mainRecs,color:P.deepBrown},
+          {label:t("Sub-Recipes","துணை சமையல்"),list:subRecs,color:P.purple},
+        ]).map(({label,list,color})=>(
+        <div key={label} style={{...css.card,padding:0,overflow:"hidden",marginBottom:16}}>
+          <div style={{padding:"8px 14px",background:color,color:"white",fontWeight:700,fontSize:13}}>
+            {label} <span style={{fontWeight:400,fontSize:11,opacity:0.8}}>({list.length})</span>
+          </div>
+          <table style={css.table}>
           <thead><tr>
             <th style={css.th}>#</th>
             <th style={css.th}>{t("Recipe Name","சமையல் பெயர்")}</th>
@@ -795,8 +798,8 @@ function RecsPage({ctx}){
             <th style={css.th}></th>
           </tr></thead>
           <tbody>
-            {vis.length===0&&<tr><td colSpan={8} style={{...css.td,textAlign:"center",color:P.muted,padding:20}}>{t("No recipes found.","சமையல் இல்லை.")}</td></tr>}
-            {vis.map((r,i)=>{
+            {list.length===0&&<tr><td colSpan={8} style={{...css.td,textAlign:"center",color:P.muted,padding:20}}>{t("No recipes found.","சமையல் இல்லை.")}</td></tr>}
+            {list.map((r,i)=>{
               const noIngs=!(r.ingredients||[]).length&&!(r.subLinks||[]).length;
               const rowBg=noIngs?"#DBEAFE":i%2===0?P.white:P.highlight;
               const hoverBg=noIngs?"#BFDBFE":"#FDE8C4";
@@ -835,7 +838,8 @@ function RecsPage({ctx}){
             );})}
           </tbody>
         </table>
-      </div>
+        </div>
+      ))}
       <div style={{fontSize:11,color:P.muted,marginTop:4}}>{vis.length} {t("recipe(s) shown","சமையல்கள் காட்டப்படுகின்றன")} — {t("click name to view / edit details","பெயரை சொடுக்கி விவரம் காண்க")}</div>
     </div>
   );
@@ -1760,6 +1764,7 @@ function RepDish({ctx}){
     });
     const recs=Object.values(byRec).map(item=>{
       const ings=sortIngs(mergeIngs(expandRecipeIngs(item.rec,item.totalMult,recipes,ingredients,false)));
+      // Sub-recipes for THIS recipe
       const subSections=ings.filter(r=>r.isSubRecipe).map(r=>{
         const subRec=recipes.find(x=>x.name===r.d.name);
         return{d:r.d,qty:r.qty,unit:r.unit,
@@ -1777,7 +1782,7 @@ function RepDish({ctx}){
 
   const printSession=(sd)=>{
     let recNo=0;
-    const recBlocks=sd.recs.map(({rec,totalQty,ings,subSections})=>{
+    const recBlocks=sd.recs.map(({rec,totalQty,ings,subSections},ri)=>{
       recNo++;
       const ingRows=ings.map((r,i)=>{
         const isSub=r.isSubRecipe;
@@ -1869,21 +1874,27 @@ function RepDish({ctx}){
           </div>
           {sd.recs.map(({rec,totalQty,ings,subSections},ri)=>(
             <div key={rec.id} style={{marginBottom:20}}>
+              {/* Main recipe header */}
               <div style={{display:'flex',alignItems:'baseline',gap:8,borderBottom:'2px solid #111',paddingBottom:5,marginBottom:6}}>
                 <span style={{fontSize:11,color:'#777',fontWeight:600,minWidth:20}}>{ri+1}</span>
                 <span style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:'#111',flex:1}}>{n(rec)}</span>
                 <span style={{fontSize:18,fontWeight:800,color:'#111',whiteSpace:'nowrap'}}>{totalQty.toFixed(3)} {rec.yieldUnit}</span>
               </div>
-              <div style={{border:'1px solid #DDD',borderRadius:4,overflow:'hidden',marginBottom:subSections&&subSections.length?6:0}}>
+              {/* Direct + sub-recipe line items */}
+              <div style={{border:'1px solid #DDD',borderRadius:4,overflow:'hidden',marginBottom:subSections&&subSections.length?10:0}}>
                 {ings.map((row,i)=><IngRow key={row.d.id} num={i+1} name={n(row.d)} qty={row.qty} unit={row.unit} isSub={row.isSubRecipe} shade={i%2===1}/>)}
               </div>
-              {(subSections||[]).map(({d,qty,unit,ings:sings})=>(
-                <div key={d.id} style={{marginBottom:6,marginLeft:20,borderLeft:'2px solid #888',padding:'6px 10px',background:'#FAFAFA',borderRadius:'0 4px 4px 0'}}>
-                  <div style={{display:'flex',alignItems:'baseline',gap:8,borderBottom:'1px solid #AAA',paddingBottom:3,marginBottom:4}}>
-                    <span style={{fontSize:13,fontWeight:700,flex:1}}>{n(d)} *</span>
-                    <span style={{fontSize:14,fontWeight:800,whiteSpace:'nowrap'}}>{qty.toFixed(3)} {unit}</span>
+              {/* Sub-recipe breakdowns as sub-headings immediately below */}
+              {(subSections||[]).map(({d,qty,unit,ings:sings},si)=>(
+                <div key={d.id} style={{marginBottom:8,marginLeft:0}}>
+                  <div style={{display:'flex',alignItems:'baseline',gap:8,
+                    background:'#F5F5F5',border:'1px solid #CCC',borderLeft:'4px solid #555',
+                    padding:'5px 10px',marginBottom:4}}>
+                    <span style={{fontSize:11,color:'#777',fontWeight:600,minWidth:28}}>{ri+1}.{si+1}</span>
+                    <span style={{fontFamily:"'Playfair Display',serif",fontSize:13,fontWeight:700,color:'#333',flex:1}}>{n(d)} *</span>
+                    <span style={{fontSize:14,fontWeight:800,color:'#333',whiteSpace:'nowrap'}}>{qty.toFixed(3)} {unit}</span>
                   </div>
-                  <div style={{border:'1px solid #DDD',borderRadius:4,overflow:'hidden'}}>
+                  <div style={{border:'1px solid #DDD',borderTop:'none',borderRadius:'0 0 4px 4px',overflow:'hidden',marginLeft:0}}>
                     {sings.map((row,i)=><IngRow key={row.d.id} num={i+1} name={n(row.d)} qty={row.qty} unit={row.unit} isSub={false} shade={i%2===1}/>)}
                   </div>
                 </div>
@@ -2014,12 +2025,22 @@ function RepShop({ctx}){
   const [rLang,setRLang]=useState(gLang);
   const t=(en,ta)=>rLang==="en"?en:ta;
   const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
-  const [dates,setDates]=useState([TODAY]);
+  const [fromDate,setFromDate]=useState(TODAY);
+  const [toDate,setToDate]=useState(TODAY);
 
-  const addDate=()=>{if(dates.length<7)setDates(d=>[...d,TODAY]);};
-  const removeDate=i=>setDates(d=>d.filter((_,j)=>j!==i));
-  const changeDate=(i,v)=>setDates(d=>d.map((x,j)=>j===i?v:x));
-  const sortedDates=[...new Set(dates)].sort();
+  // Generate all dates between from and to (inclusive)
+  const sortedDates=useMemo(()=>{
+    const dates=[];
+    const start=new Date(fromDate);
+    const end=new Date(toDate);
+    if(start>end)return[fromDate];
+    const cur=new Date(start);
+    while(cur<=end){
+      dates.push(cur.toISOString().slice(0,10));
+      cur.setDate(cur.getDate()+1);
+    }
+    return dates;
+  },[fromDate,toDate]);
 
   const getStock=iid=>{
     const bought=inventory.purchases.filter(x=>x.iid===iid).reduce((s,x)=>s+x.qty,0);
@@ -2102,16 +2123,19 @@ function RepShop({ctx}){
   return(
     <div>
       <ReportBar onPrint={null} onExport={null} lang={rLang} setLang={setRLang}>
-        <div>
-          <label style={css.lbl}>{t("Dates (up to 7)","தேதிகள்")}</label>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-            {dates.map((d,i)=>(
-              <div key={i} style={{display:"flex",alignItems:"center",gap:3}}>
-                <input type="date" style={{...css.inp,width:148}} value={d} onChange={e=>changeDate(i,e.target.value)}/>
-                {dates.length>1&&<button style={css.btn("danger",true)} onClick={()=>removeDate(i)}>✕</button>}
-              </div>
-            ))}
-            {dates.length<7&&<button style={css.btn("ghost",true)} onClick={addDate}>{"+ "+t("Add Date","தேதி சேர்")}</button>}
+        <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap"}}>
+          <div>
+            <label style={css.lbl}>{t("From","இருந்து")}</label>
+            <input type="date" style={{...css.inp,width:148}} value={fromDate}
+              onChange={e=>{setFromDate(e.target.value);if(e.target.value>toDate)setToDate(e.target.value);}}/>
+          </div>
+          <div>
+            <label style={css.lbl}>{t("To","வரை")}</label>
+            <input type="date" style={{...css.inp,width:148}} value={toDate}
+              onChange={e=>{setToDate(e.target.value);if(e.target.value<fromDate)setFromDate(e.target.value);}}/>
+          </div>
+          <div style={{fontSize:11,color:P.muted,paddingBottom:6}}>
+            {sortedDates.length} {t("day(s)","நாள்")}
           </div>
         </div>
       </ReportBar>
