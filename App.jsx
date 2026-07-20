@@ -2826,24 +2826,23 @@ function RepCost({ctx}){
 
 
 // ── Items Master (no qty — just name, Tamil, unit) ─────────────────────────
+
+// ── Items Master ──────────────────────────────────────────────────────────
 function PoojaItemsPage({ctx}){
   const {poojaItems,setPoojaItems,lang}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
   const [form,setForm]=useState({name:"",nameTamil:"",unit:"nos"});
   const [editId,setEditId]=useState(null);
   const [ef,setEf]=useState({});
+  const UNITS=["nos","kg","g","L","packet","box","bundle","pair"];
 
   const add=()=>{
     if(!form.name.trim())return;
     setPoojaItems(p=>[...p,{id:Date.now(),name:form.name.trim(),nameTamil:form.nameTamil.trim(),unit:form.unit}]);
     setForm({name:"",nameTamil:"",unit:"nos"});
   };
-  const saveEdit=()=>{
-    setPoojaItems(p=>p.map(x=>x.id===editId?{...x,...ef}:x));
-    setEditId(null);
-  };
+  const saveEdit=()=>{setPoojaItems(p=>p.map(x=>x.id===editId?{...x,...ef}:x));setEditId(null);};
   const del=(id)=>setPoojaItems(p=>p.filter(x=>x.id!==id));
-  const UNITS=["nos","kg","g","L","packet","box","bundle","pair"];
 
   return(
     <div>
@@ -2881,25 +2880,14 @@ function PoojaItemsPage({ctx}){
             {poojaItems.map((item,i)=>(
               <tr key={item.id} style={{background:i%2===0?P.white:P.highlight}}>
                 <td style={{...css.td,color:P.muted,fontSize:11}}>{i+1}</td>
-                <td style={css.td}>
-                  {editId===item.id?<input style={css.inp} value={ef.name||""} onChange={e=>setEf({...ef,name:e.target.value})}/>
-                    :<strong>{item.name}</strong>}
-                </td>
-                <td style={css.td}>
-                  {editId===item.id?<input style={{...css.inp,fontFamily:"Noto Sans Tamil"}} value={ef.nameTamil||""} onChange={e=>setEf({...ef,nameTamil:e.target.value})}/>
-                    :<span style={{fontFamily:"Noto Sans Tamil"}}>{item.nameTamil||"—"}</span>}
-                </td>
-                <td style={css.td}>
-                  {editId===item.id?<select style={css.sel} value={ef.unit||item.unit} onChange={e=>setEf({...ef,unit:e.target.value})}>{UNITS.map(u=><option key={u}>{u}</option>)}</select>
-                    :<span style={css.badge(P.muted)}>{item.unit}</span>}
-                </td>
+                <td style={css.td}>{editId===item.id?<input style={css.inp} value={ef.name||""} onChange={e=>setEf({...ef,name:e.target.value})}/>:<strong>{item.name}</strong>}</td>
+                <td style={css.td}>{editId===item.id?<input style={{...css.inp,fontFamily:"Noto Sans Tamil"}} value={ef.nameTamil||""} onChange={e=>setEf({...ef,nameTamil:e.target.value})}/>:<span style={{fontFamily:"Noto Sans Tamil"}}>{item.nameTamil||"—"}</span>}</td>
+                <td style={css.td}>{editId===item.id?<select style={css.sel} value={ef.unit||item.unit} onChange={e=>setEf({...ef,unit:e.target.value})}>{UNITS.map(u=><option key={u}>{u}</option>)}</select>:<span style={css.badge(P.muted)}>{item.unit}</span>}</td>
                 <td style={css.td}>
                   <div style={{display:"flex",gap:4}}>
                     {editId===item.id
-                      ?<><button style={css.btn("success",true)} onClick={saveEdit}>✓</button>
-                         <button style={css.btn("ghost",true)} onClick={()=>setEditId(null)}>✕</button></>
-                      :<><button style={css.btn("ghost",true)} onClick={()=>{setEditId(item.id);setEf({...item});}}>✏️</button>
-                         <button style={css.btn("danger",true)} onClick={()=>del(item.id)}>🗑</button></>}
+                      ?<><button style={css.btn("success",true)} onClick={saveEdit}>✓</button><button style={css.btn("ghost",true)} onClick={()=>setEditId(null)}>✕</button></>
+                      :<><button style={css.btn("ghost",true)} onClick={()=>{setEditId(item.id);setEf({...item});}}>✏️</button><button style={css.btn("danger",true)} onClick={()=>del(item.id)}>🗑</button></>}
                   </div>
                 </td>
               </tr>
@@ -2912,98 +2900,116 @@ function PoojaItemsPage({ctx}){
   );
 }
 
-// ── Temples & Item Lists ───────────────────────────────────────────────────
-// Each temple has items with qty for Morning / Afternoon / Evening slots
+// ── Temples & Weekly Schedule ─────────────────────────────────────────────
+// Each temple → each item → 7 days × 3 slots (Morning/Afternoon/Evening)
 function PoojaTemplesPage({ctx}){
   const {poojaTemples,setPoojaTemples,poojaItems,lang}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
   const [form,setForm]=useState({name:"",location:"",contact:""});
-  const [openId,setOpenId]=useState(null); // temple whose list is open
+  const [openId,setOpenId]=useState(null);
+  const [selDay,setSelDay]=useState("monday");
+  const [dirty,setDirty]=useState(false);
 
-  const SLOTS=["Morning","Afternoon","Evening"];
+  const DAYS=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
+  const DAY_LABEL={monday:"Mon",tuesday:"Tue",wednesday:"Wed",thursday:"Thu",friday:"Fri",saturday:"Sat",sunday:"Sun"};
+  const DAY_LABEL_TA={monday:"திங்கள்",tuesday:"செவ்வாய்",wednesday:"புதன்",thursday:"வியாழன்",friday:"வெள்ளி",saturday:"சனி",sunday:"ஞாயிறு"};
+  const SLOTS=["morning","afternoon","evening"];
+  const SLOT_ICON={morning:"🌅",afternoon:"☀️",evening:"🌙"};
 
   const addTemple=()=>{
     if(!form.name.trim())return;
-    // initialise all items with empty slots
-    const items=poojaItems.map(pi=>({itemId:pi.id,morning:"",afternoon:"",evening:""}));
+    const emptySchedule=Object.fromEntries(DAYS.map(d=>[d,{morning:"",afternoon:"",evening:""}]));
+    const items=poojaItems.map(pi=>({itemId:pi.id,schedule:{...emptySchedule}}));
     setPoojaTemples(p=>[...p,{id:Date.now(),name:form.name.trim(),location:form.location.trim(),contact:form.contact.trim(),items}]);
     setForm({name:"",location:"",contact:""});
   };
-  const delTemple=(id)=>{if(confirm(t("Delete temple?","நீக்கவா?")))setPoojaTemples(p=>p.filter(x=>x.id!==id));};
+  const delTemple=(id)=>{if(confirm(t("Delete this temple?","நீக்கவா?")))setPoojaTemples(p=>p.filter(x=>x.id!==id));};
 
-  // Update a slot qty for an item in a temple
-  const setSlotQty=(templeId,itemId,slot,val)=>{
-    setPoojaTemples(p=>p.map(t=>t.id!==templeId?t:{
-      ...t,
-      items:t.items.map(it=>it.itemId!==itemId?it:{...it,[slot.toLowerCase()]:val})
+  const setSlotQty=(templeId,itemId,day,slot,val)=>{
+    setPoojaTemples(p=>p.map(tm=>tm.id!==templeId?tm:{
+      ...tm,
+      items:tm.items.map(it=>it.itemId!==itemId?it:{
+        ...it,
+        schedule:{...it.schedule,[day]:{...(it.schedule||{})[day],[slot]:val}}
+      })
     }));
+    setDirty(true);
   };
 
-  // When items master changes, sync temple item lists (add new items, keep existing)
+  // Sync new items into existing temples
   const syncItems=(temple)=>{
     const existingIds=new Set(temple.items.map(i=>i.itemId));
+    const emptySchedule=Object.fromEntries(DAYS.map(d=>[d,{morning:"",afternoon:"",evening:""}]));
     const newItems=[...temple.items];
-    poojaItems.forEach(pi=>{if(!existingIds.has(pi.id))newItems.push({itemId:pi.id,morning:"",afternoon:"",evening:""});});
+    poojaItems.forEach(pi=>{
+      if(!existingIds.has(pi.id))newItems.push({itemId:pi.id,schedule:{...emptySchedule}});
+    });
     return newItems.filter(i=>poojaItems.some(pi=>pi.id===i.itemId));
   };
 
+  const dayN=(d)=>lang==="en"?DAY_LABEL[d]:DAY_LABEL_TA[d];
+
   return(
     <div>
-      {/* Add temple form */}
       <div style={css.card}>
         <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,color:P.deepBrown,marginBottom:12}}>
-          🛕 {t("Temples","கோவில்கள்")}
+          🛕 {t("Temples & Weekly Schedule","கோவில்கள் & வாராந்திர அட்டவணை")}
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}>
           <div><label style={css.lbl}>{t("Temple Name","கோவில் பெயர்")}</label>
-            <input style={css.inp} value={form.name} placeholder="Sri Murugan Temple"
-              onChange={e=>setForm({...form,name:e.target.value})}/>
+            <input style={css.inp} value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Sri Murugan Temple"/>
           </div>
           <div><label style={css.lbl}>{t("Location","இடம்")}</label>
-            <input style={css.inp} value={form.location} placeholder="Chennai"
-              onChange={e=>setForm({...form,location:e.target.value})}/>
+            <input style={css.inp} value={form.location} onChange={e=>setForm({...form,location:e.target.value})} placeholder="Chennai"/>
           </div>
           <div><label style={css.lbl}>{t("Contact","தொடர்பு")}</label>
-            <input style={css.inp} value={form.contact} placeholder="9876543210"
-              onChange={e=>setForm({...form,contact:e.target.value})} onKeyDown={e=>e.key==="Enter"&&addTemple()}/>
+            <input style={css.inp} value={form.contact} onChange={e=>setForm({...form,contact:e.target.value})} onKeyDown={e=>e.key==="Enter"&&addTemple()} placeholder="9876543210"/>
           </div>
         </div>
-        <button style={css.btn()} onClick={addTemple}>+ {t("Add Temple","சேர்")}</button>
+        <button style={css.btn()} onClick={addTemple}>+ {t("Add Temple","கோவில் சேர்")}</button>
       </div>
 
       {!poojaItems.length&&<div style={{...css.card,color:P.muted,textAlign:"center"}}>{t("Add items in Items Master first.","முதலில் பொருட்கள் சேர்க்கவும்.")}</div>}
 
-      {/* Temple list */}
       {poojaTemples.map(temple=>{
-        const syncedItems=syncItems(temple);
         const isOpen=openId===temple.id;
+        const syncedItems=syncItems(temple);
         return(
           <div key={temple.id} style={{...css.card,marginBottom:12}}>
-            {/* Temple header */}
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <div>
                 <strong style={{color:P.deepBrown,fontSize:14}}>{temple.name}</strong>
                 {temple.location&&<span style={{fontSize:12,color:P.muted,marginLeft:8}}>{temple.location}</span>}
-                {temple.contact&&<span style={{fontSize:12,color:P.muted,marginLeft:8}}>📞 {temple.contact}</span>}
               </div>
               <div style={{display:"flex",gap:6}}>
-                <button style={css.btn(isOpen?"primary":"ghost",true)}
-                  onClick={()=>{
-                    // Sync items when opening
-                    if(!isOpen) setPoojaTemples(p=>p.map(t=>t.id===temple.id?{...t,items:syncedItems}:t));
-                    setOpenId(isOpen?null:temple.id);
-                  }}>
-                  {isOpen?"▲":"▼"} {t("Item List","பொருள் பட்டியல்")}
+                <button style={css.btn(isOpen?"primary":"ghost",true)} onClick={()=>{
+                  if(!isOpen) setPoojaTemples(p=>p.map(tm=>tm.id===temple.id?{...tm,items:syncedItems}:tm));
+                  setOpenId(isOpen?null:temple.id);
+                  setDirty(false);
+                }}>
+                  {isOpen?"▲":"▼"} {t("Schedule","அட்டவணை")}
                 </button>
                 <button style={css.btn("danger",true)} onClick={()=>delTemple(temple.id)}>🗑</button>
               </div>
             </div>
 
-            {/* Item list with Morning/Afternoon/Evening qty */}
             {isOpen&&(
               <div style={{marginTop:12,borderTop:"1px solid #F0D8B0",paddingTop:10}}>
-                <div style={{fontSize:11,color:P.muted,marginBottom:8}}>{t("Enter qty for each slot. Leave blank if not applicable.","அளவு இல்லாத நேரங்களை காலியாக விடவும்.")}</div>
-                <table style={{...css.table,marginBottom:0}}>
+                {/* Day selector */}
+                <div style={{display:"flex",gap:4,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+                  <span style={{fontSize:12,color:P.muted,marginRight:4}}>{t("Day:","நாள்:")}</span>
+                  {DAYS.map(d=>(
+                    <button key={d} style={{...css.btn(selDay===d?"primary":"ghost",true),
+                      minWidth:44,padding:"4px 8px",fontSize:12,
+                      borderColor:d==="friday"||d==="saturday"?P.saffron:"#DCC88A",
+                    }} onClick={()=>setSelDay(d)}>
+                      {dayN(d)}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Item-slot grid for selected day */}
+                <table style={{...css.table,marginBottom:8}}>
                   <thead><tr>
                     <th style={css.th}>{t("Item","பொருள்")}</th>
                     <th style={css.th}>{t("Unit","அலகு")}</th>
@@ -3013,20 +3019,20 @@ function PoojaTemplesPage({ctx}){
                   </tr></thead>
                   <tbody>
                     {syncedItems.map((it,i)=>{
-                      const pi=poojaItems.find(x=>x.id===it.itemId);
-                      if(!pi)return null;
+                      const pi=poojaItems.find(x=>x.id===it.itemId); if(!pi)return null;
+                      const dayData=(it.schedule||{})[selDay]||{};
                       return(
                         <tr key={it.itemId} style={{background:i%2===0?P.white:P.highlight}}>
-                          <td style={css.td}><strong>{pi.name}</strong>{pi.nameTamil&&<span style={{fontFamily:"Noto Sans Tamil",color:P.muted,marginLeft:6,fontSize:11}}>{pi.nameTamil}</span>}</td>
+                          <td style={css.td}><strong>{pi.name}</strong></td>
                           <td style={css.td}><span style={css.badge(P.muted)}>{pi.unit}</span></td>
-                          {["morning","afternoon","evening"].map(slot=>(
+                          {SLOTS.map(slot=>(
                             <td key={slot} style={{...css.td,textAlign:"center"}}>
                               <input type="number" min="0" step="0.5"
-                                style={{...css.inp,width:64,textAlign:"center",padding:"4px 6px",
-                                  background:it[slot]?P.highlight:"white"}}
-                                value={it[slot]||""}
+                                style={{...css.inp,width:72,textAlign:"center",padding:"4px 8px",
+                                  background:dayData[slot]?"#FEF3C7":"white"}}
+                                value={dayData[slot]||""}
                                 placeholder="—"
-                                onChange={e=>setSlotQty(temple.id,it.itemId,slot,e.target.value)}/>
+                                onChange={e=>setSlotQty(temple.id,it.itemId,selDay,slot,e.target.value)}/>
                             </td>
                           ))}
                         </tr>
@@ -3034,48 +3040,33 @@ function PoojaTemplesPage({ctx}){
                     })}
                   </tbody>
                 </table>
-                <div style={{marginTop:8,textAlign:"right"}}>
-                  <span style={{fontSize:11,color:P.success}}>✓ {t("Changes save automatically","மாற்றங்கள் தானாக சேமிக்கப்படும்")}</span>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontSize:11,color:P.muted}}>{t("Tip: Enter qty only for applicable slots. Leave blank to skip.","அளவு இல்லாத நேரங்களை காலியாக விடவும்.")}</span>
+                  {dirty&&<span style={{fontSize:12,color:P.success,fontWeight:700}}>✓ {t("Saved","சேமிக்கப்பட்டது")}</span>}
                 </div>
               </div>
             )}
           </div>
         );
       })}
-      {!poojaTemples.length&&<div style={{...css.card,textAlign:"center",color:P.muted}}>{t("No temples yet.","கோவில்கள் இல்லை.")}</div>}
+      {!poojaTemples.length&&<div style={{...css.card,textAlign:"center",color:P.muted,padding:24}}>{t("No temples yet.","கோவில்கள் இல்லை.")}</div>}
     </div>
   );
 }
 
-// ── Dispatch ──────────────────────────────────────────────────────────────
-// For each date, show temples → items → Morning/Afternoon/Evening dispatch
+// ── Dispatch ───────────────────────────────────────────────────────────────
+// Select date → auto-loads that day's weekly schedule → editable → mark dispatched
 function PoojaDispatchPage({ctx}){
   const {poojaTemples,poojaItems,poojaDels,setPoojaDels,lang}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
   const [dt,setDt]=useState(TODAY);
-  const [view,setView]=useState("dispatch"); // "dispatch" | "history"
+  const [view,setView]=useState("dispatch");
+  // Overrides: {templeId_itemId_slot: qty}
+  const [overrides,setOverrides]=useState({});
+  const [saved,setSaved]=useState(false);
 
-  // Get dispatch status key
-  const dKey=(templeId,itemId,slot)=>`${dt}_${templeId}_${itemId}_${slot}`;
-
-  // Check if dispatched
-  const isDispatched=(templeId,itemId,slot)=>
-    poojaDels.some(d=>d.key===dKey(templeId,itemId,slot));
-
-  // Toggle dispatch
-  const toggleDispatch=(templeId,itemId,slot,templeName,itemName,qty,unit)=>{
-    const key=dKey(templeId,itemId,slot);
-    if(isDispatched(templeId,itemId,slot)){
-      setPoojaDels(p=>p.filter(d=>d.key!==key));
-    } else {
-      setPoojaDels(p=>[...p,{key,date:dt,templeId,itemId,slot,templeName,itemName,qty,unit,dispatchedAt:new Date().toISOString()}]);
-    }
-  };
-
-  // Temples that have at least one item with qty
-  const activeTemples=poojaTemples.filter(t=>t.items&&t.items.some(it=>
-    it.morning||it.afternoon||it.evening
-  ));
+  const DAYS=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+  const getDayOfWeek=(dateStr)=>DAYS[new Date(dateStr).getDay()];
 
   const SLOTS=[
     {key:"morning",label:t("Morning","காலை"),icon:"🌅",bg:"#EBF5FB"},
@@ -3083,84 +3074,122 @@ function PoojaDispatchPage({ctx}){
     {key:"evening",label:t("Evening","மாலை"),icon:"🌙",bg:"#EAF2F8"},
   ];
 
-  // Export dispatch sheet
+  const dayKey=getDayOfWeek(dt);
+
+  // Get scheduled qty for a slot (from weekly schedule, overridden by manual entry)
+  const getQty=(templeId,itemId,slot)=>{
+    const oKey=`${templeId}_${itemId}_${slot}`;
+    if(overrides[oKey]!==undefined)return overrides[oKey];
+    const temple=poojaTemples.find(t=>t.id===templeId);
+    const it=temple?.items?.find(x=>x.itemId===itemId);
+    return (it?.schedule||{})[dayKey]?.[slot]||"";
+  };
+
+  const setQty=(templeId,itemId,slot,val)=>{
+    setOverrides(p=>({...p,[`${templeId}_${itemId}_${slot}`]:val}));
+    setSaved(false);
+  };
+
+  const dKey=(templeId,itemId,slot)=>`${dt}_${templeId}_${itemId}_${slot}`;
+  const isDispatched=(templeId,itemId,slot)=>poojaDels.some(d=>d.key===dKey(templeId,itemId,slot));
+
+  const toggleDispatch=(templeId,itemId,slot,templeName,itemName,unit)=>{
+    const key=dKey(templeId,itemId,slot);
+    const qty=getQty(templeId,itemId,slot);
+    if(isDispatched(templeId,itemId,slot)){
+      setPoojaDels(p=>p.filter(d=>d.key!==key));
+    } else {
+      setPoojaDels(p=>[...p,{key,date:dt,templeId,itemId,slot,templeName,itemName,qty,unit,
+        dispatchedAt:new Date().toISOString()}]);
+    }
+    setSaved(true);
+  };
+
+  const activeTemples=poojaTemples.filter(tm=>
+    poojaItems.some(pi=>{
+      const it=tm.items?.find(x=>x.itemId===pi.id);
+      return SLOTS.some(s=>getQty(tm.id,pi.id,s.key));
+    })
+  );
+
   const exportSheet=()=>{
     const rows=[];
-    activeTemples.forEach(temple=>{
-      rows.push({Temple:temple.name,"":"","Item":"","Morning":"","Afternoon":"","Evening":""});
+    activeTemples.forEach(tm=>{
+      rows.push({Temple:tm.name,Item:"",Morning:"",Afternoon:"",Evening:"",Status:""});
       poojaItems.forEach(pi=>{
-        const it=temple.items.find(x=>x.itemId===pi.id);
-        if(!it||(!(it.morning)||!(it.afternoon)||!(it.evening))&&!it.morning&&!it.afternoon&&!it.evening)return;
-        if(!it.morning&&!it.afternoon&&!it.evening)return;
-        rows.push({
-          Temple:"",
-          Item:pi.name,
-          Morning:it.morning?`${it.morning} ${pi.unit}`:"",
-          Afternoon:it.afternoon?`${it.afternoon} ${pi.unit}`:"",
-          Evening:it.evening?`${it.evening} ${pi.unit}`:"",
-        });
+        const m=getQty(tm.id,pi.id,"morning"),a=getQty(tm.id,pi.id,"afternoon"),e=getQty(tm.id,pi.id,"evening");
+        if(!m&&!a&&!e)return;
+        rows.push({Temple:"",Item:pi.name,
+          Morning:m?`${m} ${pi.unit}`:"",Afternoon:a?`${a} ${pi.unit}`:"",Evening:e?`${e} ${pi.unit}`:"",
+          Status:SLOTS.filter(s=>getQty(tm.id,pi.id,s.key)).map(s=>isDispatched(tm.id,pi.id,s.key)?"✓ "+s.label:s.label).join(" / ")});
       });
-      rows.push({Temple:"",Item:"",Morning:"",Afternoon:"",Evening:""});
+      rows.push({Temple:"",Item:"",Morning:"",Afternoon:"",Evening:"",Status:""});
     });
     exportXlsxSheets("pooja_dispatch_"+dt+".xlsx",[{name:"Dispatch",data:rows}]);
   };
 
   return(
     <div>
-      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"flex-end"}}>
         <div>
           <label style={css.lbl}>{t("Date","தேதி")}</label>
-          <input type="date" style={{...css.inp,width:160}} value={dt} onChange={e=>setDt(e.target.value)}/>
+          <input type="date" style={{...css.inp,width:160}} value={dt}
+            onChange={e=>{setDt(e.target.value);setOverrides({});setSaved(false);}}/>
         </div>
-        <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+        <div style={{fontSize:11,color:P.muted,paddingBottom:6,fontWeight:600}}>
+          📅 {dayKey.charAt(0).toUpperCase()+dayKey.slice(1)}
+        </div>
+        <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"flex-end"}}>
+          {saved&&<span style={{fontSize:12,color:P.success,fontWeight:700,paddingBottom:6}}>✓ {t("Saved","சேமிக்கப்பட்டது")}</span>}
           <button style={css.btn(view==="dispatch"?"primary":"ghost",true)} onClick={()=>setView("dispatch")}>📦 {t("Dispatch","அனுப்புதல்")}</button>
           <button style={css.btn(view==="history"?"primary":"ghost",true)} onClick={()=>setView("history")}>📋 {t("History","வரலாறு")}</button>
-          <button style={css.btn("ghost",true)} onClick={exportSheet}>📥 {t("Excel","எக்செல்")}</button>
+          <button style={css.btn("ghost",true)} onClick={exportSheet}>📥 Excel</button>
         </div>
       </div>
 
       {view==="dispatch"&&(
         <>
-          {!activeTemples.length&&<div style={{...css.card,textAlign:"center",color:P.muted}}>{t("No temples configured. Set up item lists in Temples & Lists.","கோவில்கள் இல்லை.")}</div>}
-          {activeTemples.map(temple=>(
-            <div key={temple.id} style={{...css.card,marginBottom:12}}>
+          {!activeTemples.length&&<div style={{...css.card,textAlign:"center",color:P.muted}}>
+            {t("No items scheduled for this day. Set up weekly schedule in Temples & Lists.","இந்த நாளில் அட்டவணை இல்லை.")}
+          </div>}
+          {activeTemples.map(tm=>(
+            <div key={tm.id} style={{...css.card,marginBottom:12}}>
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:P.deepBrown,marginBottom:10}}>
-                🛕 {temple.name}
-                {temple.location&&<span style={{fontSize:12,color:P.muted,marginLeft:8,fontFamily:"sans-serif",fontWeight:400}}>{temple.location}</span>}
+                🛕 {tm.name}
+                {tm.location&&<span style={{fontSize:12,color:P.muted,marginLeft:8,fontFamily:"sans-serif",fontWeight:400}}>{tm.location}</span>}
               </div>
               <table style={{...css.table,marginBottom:0}}>
                 <thead><tr>
                   <th style={css.th}>{t("Item","பொருள்")}</th>
-                  {SLOTS.map(s=>(
-                    <th key={s.key} style={{...css.th,textAlign:"center",minWidth:110}}>
-                      {s.icon} {s.label}
-                    </th>
-                  ))}
+                  {SLOTS.map(s=><th key={s.key} style={{...css.th,textAlign:"center",minWidth:130}}>{s.icon} {s.label}</th>)}
                 </tr></thead>
                 <tbody>
                   {poojaItems.map((pi,i)=>{
-                    const it=temple.items?.find(x=>x.itemId===pi.id);
-                    if(!it)return null;
-                    const hasAny=it.morning||it.afternoon||it.evening;
+                    const hasAny=SLOTS.some(s=>getQty(tm.id,pi.id,s.key));
                     if(!hasAny)return null;
                     return(
                       <tr key={pi.id} style={{background:i%2===0?P.white:P.highlight}}>
                         <td style={css.td}><strong>{pi.name}</strong></td>
                         {SLOTS.map(s=>{
-                          const qty=it[s.key];
-                          if(!qty)return <td key={s.key} style={{...css.td,textAlign:"center",color:P.muted}}>—</td>;
-                          const done=isDispatched(temple.id,pi.id,s.key);
+                          const qty=getQty(tm.id,pi.id,s.key);
+                          const done=isDispatched(tm.id,pi.id,s.key);
                           return(
-                            <td key={s.key} style={{...css.td,textAlign:"center",background:done?"#E8F8E8":s.bg}}>
-                              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-                                <span style={{fontSize:12,fontWeight:700,color:done?"#1A7A40":P.deepBrown}}>{qty} {pi.unit}</span>
-                                <button
-                                  onClick={()=>toggleDispatch(temple.id,pi.id,s.key,temple.name,pi.name,qty,pi.unit)}
-                                  style={{...css.btn(done?"success":"ghost",true),fontSize:11,padding:"3px 10px",
-                                    fontWeight:done?700:400}}>
-                                  {done?"✓ "+t("Done","முடிந்தது"):t("Mark","குறி")}
-                                </button>
-                              </div>
+                            <td key={s.key} style={{...css.td,textAlign:"center",background:done?"#E8F8E8":qty?s.bg:"transparent"}}>
+                              {qty?(
+                                <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+                                  <input type="number" min="0" step="0.5"
+                                    style={{...css.inp,width:72,textAlign:"center",padding:"3px 6px",
+                                      fontSize:13,fontWeight:700,background:"white",
+                                      border:done?"2px solid #1A7A40":"1px solid #DCC88A"}}
+                                    value={qty} onChange={e=>setQty(tm.id,pi.id,s.key,e.target.value)}
+                                    disabled={done}/>
+                                  <span style={{fontSize:10,color:P.muted}}>{pi.unit}</span>
+                                  <button onClick={()=>toggleDispatch(tm.id,pi.id,s.key,tm.name,pi.name,pi.unit)}
+                                    style={{...css.btn(done?"success":"ghost",true),fontSize:11,padding:"3px 12px"}}>
+                                    {done?"✓ "+t("Done","முடிந்தது"):t("Dispatch","அனுப்பு")}
+                                  </button>
+                                </div>
+                              ):<span style={{color:P.muted,fontSize:12}}>—</span>}
                             </td>
                           );
                         })}
@@ -3174,30 +3203,25 @@ function PoojaDispatchPage({ctx}){
         </>
       )}
 
-      {view==="history"&&(
-        <div>
-          {(() => {
-            const dayDels=poojaDels.filter(d=>d.date===dt);
-            if(!dayDels.length)return <div style={{...css.card,textAlign:"center",color:P.muted}}>{t("No dispatches recorded for this date.","இந்த தேதியில் பதிவு இல்லை.")}</div>;
-            // Group by temple
-            const byTemple={};
-            dayDels.forEach(d=>{if(!byTemple[d.templeName])byTemple[d.templeName]=[];byTemple[d.templeName].push(d);});
-            return Object.entries(byTemple).map(([name,dels])=>(
-              <div key={name} style={{...css.card,marginBottom:8}}>
-                <div style={{fontWeight:700,color:P.deepBrown,marginBottom:6}}>🛕 {name}</div>
-                {dels.map(d=>(
-                  <div key={d.key} style={{display:"flex",gap:10,fontSize:12,padding:"3px 0",borderBottom:"1px solid #F0D8B0"}}>
-                    <span style={{flex:1}}>{d.itemName}</span>
-                    <span style={{color:P.muted}}>{d.slot==="morning"?"🌅":d.slot==="afternoon"?"☀️":"🌙"} {d.slot}</span>
-                    <span style={{fontWeight:700,color:P.saffron}}>{d.qty} {d.unit}</span>
-                    <span style={{color:"#888",fontSize:10}}>{new Date(d.dispatchedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</span>
-                  </div>
-                ))}
+      {view==="history"&&(()=>{
+        const dayDels=poojaDels.filter(d=>d.date===dt);
+        if(!dayDels.length)return <div style={{...css.card,textAlign:"center",color:P.muted}}>{t("No dispatches for this date.","இந்த தேதியில் பதிவு இல்லை.")}</div>;
+        const byTemple={};
+        dayDels.forEach(d=>{if(!byTemple[d.templeName])byTemple[d.templeName]=[];byTemple[d.templeName].push(d);});
+        return Object.entries(byTemple).map(([name,dels])=>(
+          <div key={name} style={{...css.card,marginBottom:8}}>
+            <div style={{fontWeight:700,color:P.deepBrown,marginBottom:6}}>🛕 {name}</div>
+            {dels.map(d=>(
+              <div key={d.key} style={{display:"flex",gap:10,fontSize:12,padding:"4px 0",borderBottom:"1px solid #F0D8B0"}}>
+                <span style={{flex:1,fontWeight:600}}>{d.itemName}</span>
+                <span style={{color:P.muted}}>{d.slot==="morning"?"🌅":d.slot==="afternoon"?"☀️":"🌙"} {d.slot}</span>
+                <span style={{fontWeight:700,color:P.saffron}}>{d.qty} {d.unit}</span>
+                <span style={{color:"#888",fontSize:10}}>{new Date(d.dispatchedAt).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}</span>
               </div>
-            ));
-          })()}
-        </div>
-      )}
+            ))}
+          </div>
+        ));
+      })()}
     </div>
   );
 }
@@ -3206,65 +3230,70 @@ function PoojaDispatchPage({ctx}){
 function PoojaPurchasePage({ctx}){
   const {poojaTemples,poojaItems,lang}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
+  const DAYS=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
+  const [selDay,setSelDay]=useState("monday");
+  const DAY_LABEL={monday:"Mon",tuesday:"Tue",wednesday:"Wed",thursday:"Thu",friday:"Fri",saturday:"Sat",sunday:"Sun"};
 
-  // Aggregate: for each item, sum qty across all temples and all slots
+  // Aggregate for selected day across all temples and slots
   const totals={};
-  poojaTemples.forEach(temple=>{
-    (temple.items||[]).forEach(it=>{
+  poojaTemples.forEach(tm=>{
+    (tm.items||[]).forEach(it=>{
       const pi=poojaItems.find(x=>x.id===it.itemId); if(!pi)return;
+      const day=(it.schedule||{})[selDay]||{};
+      const m=+day.morning||0,a=+day.afternoon||0,e=+day.evening||0;
+      if(!m&&!a&&!e)return;
       if(!totals[it.itemId])totals[it.itemId]={item:pi,morning:0,afternoon:0,evening:0,temples:[]};
-      totals[it.itemId].morning+=+it.morning||0;
-      totals[it.itemId].afternoon+=+it.afternoon||0;
-      totals[it.itemId].evening+=+it.evening||0;
-      const slotTotal=(+it.morning||0)+(+it.afternoon||0)+(+it.evening||0);
-      if(slotTotal>0) totals[it.itemId].temples.push({name:temple.name,morning:it.morning,afternoon:it.afternoon,evening:it.evening});
+      totals[it.itemId].morning+=m;
+      totals[it.itemId].afternoon+=a;
+      totals[it.itemId].evening+=e;
+      totals[it.itemId].temples.push({name:tm.name,m,a,e});
     });
   });
-  const rows=Object.values(totals).filter(r=>(r.morning+r.afternoon+r.evening)>0)
-    .sort((a,b)=>a.item.name.localeCompare(b.item.name));
+  const rows=Object.values(totals).sort((a,b)=>a.item.name.localeCompare(b.item.name));
 
   const exportPO=()=>{
-    const data=rows.map(r=>({
-      Item:r.item.name, Unit:r.item.unit,
-      [t("Morning Total","காலை மொத்தம்")]:r.morning||"",
-      [t("Afternoon Total","மதியம் மொத்தம்")]:r.afternoon||"",
-      [t("Evening Total","மாலை மொத்தம்")]:r.evening||"",
-      [t("Grand Total","மொத்தம்")]:r.morning+r.afternoon+r.evening,
-      [t("Temples","கோவில்கள்")]:r.temples.map(tt=>`${tt.name}(M:${tt.morning||0}/A:${tt.afternoon||0}/E:${tt.evening||0})`).join(", "),
+    const data=rows.map((r,i)=>({
+      Item:r.item.name,Unit:r.item.unit,
+      [t("Morning","காலை")]:r.morning||"",
+      [t("Afternoon","மதியம்")]:r.afternoon||"",
+      [t("Evening","மாலை")]:r.evening||"",
+      [t("Total","மொத்தம்")]:r.morning+r.afternoon+r.evening,
+      Available:"",
+      [t("To Purchase","வாங்க")]:{f:`IF(G${i+2}="",F${i+2},MAX(0,F${i+2}-G${i+2}))`},
+      [t("Temples","கோவில்கள்")]:r.temples.map(tt=>`${tt.name}(${tt.m||0}/${tt.a||0}/${tt.e||0})`).join(", "),
     }));
-    exportXlsxSheets("pooja_purchase.xlsx",[{name:"Purchase",data}]);
+    exportXlsxSheets("pooja_purchase_"+selDay+".xlsx",[{name:DAY_LABEL[selDay],data}]);
   };
 
   return(
     <div>
-      <div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}>
-        <button style={css.btn("success",true)} onClick={exportPO}>📋 {t("Purchase Order Excel","கொள்முதல் ஆர்டர்")}</button>
+      <div style={{display:"flex",gap:6,marginBottom:12,alignItems:"center",flexWrap:"wrap"}}>
+        <span style={{fontSize:12,color:P.muted,marginRight:4}}>{t("Day:","நாள்:")}</span>
+        {DAYS.map(d=><button key={d} style={{...css.btn(selDay===d?"primary":"ghost",true),
+          minWidth:44,padding:"4px 10px",fontSize:12}} onClick={()=>setSelDay(d)}>{DAY_LABEL[d]}</button>)}
+        <button style={{...css.btn("success",true),marginLeft:"auto"}} onClick={exportPO}>📋 {t("Purchase Order","கொள்முதல் ஆர்டர்")}</button>
       </div>
-      {!rows.length&&<div style={{...css.card,textAlign:"center",color:P.muted}}>{t("No items configured for any temple yet.","கோவில்களில் பொருட்கள் இல்லை.")}</div>}
-      {rows.length>0&&(
+
+      {!rows.length?<div style={{...css.card,textAlign:"center",color:P.muted}}>{t("No items scheduled for this day.","இந்த நாளில் அட்டவணை இல்லை.")}</div>:(
         <div style={{...css.card,padding:0,overflow:"hidden"}}>
           <table style={css.table}>
             <thead><tr>
               <th style={css.th}>{t("Item","பொருள்")}</th>
-              <th style={{...css.th,textAlign:"center"}}>🌅 {t("Morning","காலை")}</th>
-              <th style={{...css.th,textAlign:"center"}}>☀️ {t("Afternoon","மதியம்")}</th>
-              <th style={{...css.th,textAlign:"center"}}>🌙 {t("Evening","மாலை")}</th>
+              <th style={{...css.th,textAlign:"center"}}>🌅</th>
+              <th style={{...css.th,textAlign:"center"}}>☀️</th>
+              <th style={{...css.th,textAlign:"center"}}>🌙</th>
               <th style={{...css.th,textAlign:"center"}}>{t("Total","மொத்தம்")}</th>
               <th style={css.th}>{t("Temples","கோவில்கள்")}</th>
             </tr></thead>
             <tbody>
               {rows.map((r,i)=>(
                 <tr key={r.item.id} style={{background:i%2===0?P.white:P.highlight}}>
-                  <td style={css.td}><strong>{r.item.name}</strong>{r.item.nameTamil&&<span style={{fontFamily:"Noto Sans Tamil",color:P.muted,marginLeft:6,fontSize:11}}>{r.item.nameTamil}</span>}</td>
+                  <td style={css.td}><strong>{r.item.name}</strong></td>
                   <td style={{...css.td,textAlign:"center"}}>{r.morning?<strong style={{color:"#1a5276"}}>{r.morning} {r.item.unit}</strong>:"—"}</td>
                   <td style={{...css.td,textAlign:"center"}}>{r.afternoon?<strong style={{color:"#784212"}}>{r.afternoon} {r.item.unit}</strong>:"—"}</td>
                   <td style={{...css.td,textAlign:"center"}}>{r.evening?<strong style={{color:"#1a237e"}}>{r.evening} {r.item.unit}</strong>:"—"}</td>
                   <td style={{...css.td,textAlign:"center"}}><strong style={{color:P.saffron,fontSize:14}}>{r.morning+r.afternoon+r.evening} {r.item.unit}</strong></td>
-                  <td style={css.td}>
-                    <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                      {r.temples.map(tt=><span key={tt.name} style={{...css.badge(P.muted),fontSize:10}}>{tt.name}</span>)}
-                    </div>
-                  </td>
+                  <td style={css.td}><div style={{display:"flex",flexWrap:"wrap",gap:3}}>{r.temples.map(tt=><span key={tt.name} style={{...css.badge(P.muted),fontSize:10}}>{tt.name}</span>)}</div></td>
                 </tr>
               ))}
             </tbody>
