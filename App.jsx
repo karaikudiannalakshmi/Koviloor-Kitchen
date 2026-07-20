@@ -679,11 +679,11 @@ function IngsPage({ctx}){
 function RecsPage({ctx}){
   const {recipes,setRecipes,ingredients,recipeTypes,lang,setModal}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
-  const [showSub,setShowSub]=useState(false);
   const [q,setQ]=useState("");
   const [typeF,setTypeF]=useState("all");
   const [translating,setTranslating]=useState(false);
   const [transProgress,setTransProgress]=useState("");
+  const recFileRef=useRef();
 
   const exportRecipes=()=>{
     const data=recipes.map(r=>({
@@ -749,24 +749,19 @@ function RecsPage({ctx}){
     alert("Done! Translated "+Object.keys(results).length+" recipes.");
   };
 
-  const vis=recipes
-    .filter(r=>showSub||!r.isSubRecipe)
-    .filter(r=>typeF==="all"||r.recipeType===typeF)
-    .filter(r=>{
-      const qq=q.toLowerCase();
-      return !qq||r.name.toLowerCase().includes(qq)||r.nameTamil.includes(q);
-    });
-
+  const filterFn=r=>{
+    if(typeF!=="all"&&r.recipeType!==typeF)return false;
+    const qq=q.toLowerCase();
+    return !qq||r.name.toLowerCase().includes(qq)||(r.nameTamil||"").toLowerCase().includes(qq);
+  };
+  const mainRecs=recipes.filter(r=>!r.isSubRecipe).filter(filterFn);
+  const subRecs=recipes.filter(r=>r.isSubRecipe).filter(filterFn);
   const usedTypes=[...new Set(recipes.map(r=>r.recipeType).filter(Boolean))];
 
   return(
     <div>
       <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"center",flexWrap:"wrap"}}>
         <input style={{...css.inp,maxWidth:220}} placeholder={t("Search recipes...","தேடு...")} value={q} onChange={e=>setQ(e.target.value)}/>
-        <label style={{display:"flex",alignItems:"center",gap:5,fontSize:12,cursor:"pointer",whiteSpace:"nowrap"}}>
-          <input type="checkbox" checked={showSub} onChange={e=>setShowSub(e.target.checked)}/>
-          {t("Include Sub-Recipes","துணை காட்டு")}
-        </label>
         <div style={{marginLeft:"auto",display:"flex",gap:6}}>
           <button style={css.btn("ghost",true)} onClick={()=>setModal({type:"recipeTypes"})}>⚙️ {t("Manage Types","வகை நிர்வகி")}</button>
           <button style={css.btn("ghost",true)} onClick={exportRecipes}>⬇️ {t("Export Names","பெயர் ஏற்று")}</button>
@@ -785,7 +780,14 @@ function RecsPage({ctx}){
         <span style={{width:10,height:10,background:"#2563EB",borderRadius:2,display:"inline-block",flexShrink:0}}/>
         {t("Blue rows have no ingredients — click to edit","நீல வரிசைகளில் பொருட்கள் இல்லை — திருத்த கிளிக்")}
       </div>
-      <div style={{...css.card,padding:0,overflow:"hidden"}}>
+      {([
+        {label:t("Recipes","சமையல் குறிப்புகள்"),list:mainRecs,color:P.deepBrown},
+        {label:t("Sub-Recipes","துணை சமையல்"),list:subRecs,color:P.purple},
+      ]).map(({label,list,color})=>(
+      <div key={label} style={{...css.card,padding:0,overflow:"hidden",marginBottom:12}}>
+        <div style={{padding:"8px 14px",background:color,color:"white",fontWeight:700,fontSize:13}}>
+          {label} <span style={{fontWeight:400,fontSize:11,opacity:0.8}}>({list.length})</span>
+        </div>
         <table style={css.table}>
           <thead><tr>
             <th style={css.th}>#</th>
@@ -799,8 +801,8 @@ function RecsPage({ctx}){
             <th style={css.th}></th>
           </tr></thead>
           <tbody>
-            {vis.length===0&&<tr><td colSpan={8} style={{...css.td,textAlign:"center",color:P.muted,padding:20}}>{t("No recipes found.","சமையல் இல்லை.")}</td></tr>}
-            {vis.map((r,i)=>{
+            {list.length===0&&<tr><td colSpan={8} style={{...css.td,textAlign:"center",color:P.muted,padding:20}}>{t("No recipes found.","சமையல் இல்லை.")}</td></tr>}
+            {list.map((r,i)=>{
               const noIngs=!(r.ingredients||[]).length&&!(r.subLinks||[]).length;
               const rowBg=noIngs?"#DBEAFE":i%2===0?P.white:P.highlight;
               const hoverBg=noIngs?"#BFDBFE":"#FDE8C4";
@@ -840,7 +842,8 @@ function RecsPage({ctx}){
           </tbody>
         </table>
       </div>
-      <div style={{fontSize:11,color:P.muted,marginTop:4}}>{vis.length} {t("recipe(s) shown","சமையல்கள் காட்டப்படுகின்றன")} — {t("click name to view / edit details","பெயரை சொடுக்கி விவரம் காண்க")}</div>
+      ))}
+      <div style={{fontSize:11,color:P.muted,marginTop:4}}>{mainRecs.length+subRecs.length} {t("recipe(s) shown","சமையல்கள் காட்டப்படுகின்றன")} — {t("click name to view / edit details","பெயரை சொடுக்கி விவரம் காண்க")}</div>
     </div>
   );
 }
@@ -1936,13 +1939,14 @@ function RepIng({ctx}){
   const t=(en,ta)=>rLang==="en"?en:ta;
   const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
   const [dt,setDt]=useState(TODAY);
+  const [activeSess,setActiveSess]=useState("All");
 
   const entries=orders.filter(o=>!o.isTemplate&&o.date===dt).flatMap(o=>o.entries.map(e=>({...e,_order:o})));
 
   // Build session → ingredient → dishes
   const sessData=SESSIONS.map(sess=>{
     const sessEntries=entries.filter(e=>e.session===sess);
-    const rows=computeTotals(sessEntries,recipes,ingredients,undefined,false);
+    const rows=computeTotals(sessEntries,recipes,ingredients,undefined,true); // expand sub-recipes to raw ingredients
     const byIng={};
     rows.forEach(r=>{
       if(!byIng[r.d.id])byIng[r.d.id]={d:r.d,total:0,unit:r.unit,dishes:{}};
@@ -1954,7 +1958,8 @@ function RepIng({ctx}){
     return {session:sess,ings};
   }).filter(sd=>sd.ings.length>0);
 
-  const hasData=sessData.length>0;
+  const visibleSess=activeSess==="All"?sessData:sessData.filter(sd=>sd.session===activeSess);
+  const hasData=visibleSess.length>0;
 
   const printSession=(sd)=>{
     const trows=sd.ings.map(row=>{
@@ -1995,8 +2000,19 @@ function RepIng({ctx}){
       <ReportBar onPrint={null} onExport={null} lang={rLang} setLang={setRLang}>
         <div><label style={css.lbl}>{t("Date","தேதி")}</label><input type="date" style={{...css.inp,width:160}} value={dt} onChange={e=>setDt(e.target.value)}/></div>
       </ReportBar>
+      <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+        {["All",...SESSIONS].map(s=>{
+          const has=s==="All"?sessData.length>0:sessData.some(sd=>sd.session===s);
+          if(!has&&s!=="All")return null;
+          return(<button key={s} style={{...css.btn(activeSess===s?"primary":"ghost",true),
+            borderColor:s!=="All"?(SCOLOR[s]||P.muted):"#DCC88A",
+            color:activeSess===s?"white":(s!=="All"?SCOLOR[s]:P.deepBrown),
+            background:activeSess===s?(SCOLOR[s]||P.saffron):"transparent",
+          }} onClick={()=>setActiveSess(s)}>{s==="All"?t("All Sessions","அனைத்து"):s}</button>);
+        })}
+      </div>
       {!hasData&&<div style={{color:P.muted,textAlign:"center",padding:24}}>{t("No orders for this date.","இந்த தேதியில் ஆர்டர் இல்லை.")}</div>}
-      {sessData.map(sd=>(
+      {visibleSess.map(sd=>(
         <div key={sd.session} style={{...css.card,marginBottom:16}}>
           {/* Session header with print/export buttons */}
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
