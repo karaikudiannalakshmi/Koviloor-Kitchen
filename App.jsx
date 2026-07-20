@@ -2100,7 +2100,7 @@ function RepShop({ctx}){
     sortedDates.forEach(dt=>{
       Object.values(byDate[dt]).forEach(r=>{
         if(!combined[r.d.id])combined[r.d.id]={d:r.d,qty:0,unit:r.unit};
-        combined[r.d.id].qty+=convertUnit(r.qty,r.unit,combined[r.d.id].unit);
+        combined[r.d.id].qty+=cvtUnit(r.qty,r.unit,combined[r.d.id].unit);
       });
     });
     const allIngIds=[...new Set(sortedDates.flatMap(dt=>Object.keys(byDate[dt]).map(Number)))];
