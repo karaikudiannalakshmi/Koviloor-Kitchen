@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react"; 
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useKitchenData } from "./useKitchenData.js";
 import { RTYPE_SEED } from "./seeds.js";
 import * as XLSX from "xlsx";
@@ -2246,6 +2246,7 @@ function RepShop({ctx}){
         <>
           {/* Print/Export buttons for this session */}
           <div style={{display:"flex",gap:6,justifyContent:"flex-end",marginBottom:10}}>
+            <button style={{...css.btn("success",true),fontWeight:700}} onClick={exportPurchaseOrder}>📋 {t("Purchase Order","கொள்முதல் ஆர்டர்")}</button>
             <button style={css.btn("ghost",true)} onClick={()=>exportSession(activeTab)}>📥 {t("Excel","எக்செல்")}</button>
             <button style={css.btn("primary",true)} onClick={()=>{
               const dateCols=sortedDates.map(d=>"<th style='text-align:right'>"+d.slice(5)+"</th>").join("");
@@ -3523,5 +3524,4 @@ function PurchForm({ctx,onClose}){
     </div>
   );
 }
-              <button style={{...css.btn("success",true),fontWeight:700}} onClick={exportPurchaseOrder}>📋 {t("Purchase Order","கொள்முதல் ஆர்டர்")}</button>
 export default App;

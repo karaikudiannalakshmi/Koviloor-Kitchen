@@ -30,6 +30,9 @@ export function useKitchenData() {
   const [inventory,    _setInventory]    = useState({ purchases: [], issues: [] });
   const [locations,    _setLocations]    = useState([]);
   const [recipeTypes,  _setRecipeTypes]  = useState([]);
+  const [poojaItems,   _setPoojaItems]   = useState([]);
+  const [poojaTemples, _setPoojaTemples] = useState([]);
+  const [poojaDels,    _setPoojaDels]    = useState([]);
 
   // cur mirrors the latest user-edited state for Firestore writes
   const cur       = useRef({ orders:[], inventory:{purchases:[],issues:[]}, locations:[], recipeTypes:[], ingredients:[], recipes:[] });
@@ -58,6 +61,9 @@ export function useKitchenData() {
       _setInventory(data.inventory ?? { purchases:[], issues:[] });
       _setLocations(data.locations ?? LOC0);
       _setRecipeTypes(data.recipeTypes ?? RTYPE_SEED);
+      _setPoojaItems(data.poojaItems   ?? []);
+      _setPoojaTemples(data.poojaTemples ?? []);
+      _setPoojaDels(data.poojaDels    ?? []);
       kitOK.current = true;
       checkLoaded();
     }, err => { console.error("Kitchen:", err); setLoaded(true); });
@@ -86,10 +92,13 @@ export function useKitchenData() {
     setSaveStatus("saving");
     Promise.all([
       setDoc(doc(db, COL, KITCHEN_DOC), clean({
-        orders:      cur.current.orders,
-        inventory:   cur.current.inventory,
-        locations:   cur.current.locations,
-        recipeTypes: cur.current.recipeTypes,
+        orders:       cur.current.orders,
+        inventory:    cur.current.inventory,
+        locations:    cur.current.locations,
+        recipeTypes:  cur.current.recipeTypes,
+        poojaItems:   cur.current.poojaItems,
+        poojaTemples: cur.current.poojaTemples,
+        poojaDels:    cur.current.poojaDels,
       })),
       setDoc(doc(db, COL, CATALOG_DOC), clean({
         recipes:     cur.current.recipes,
@@ -135,5 +144,8 @@ export function useKitchenData() {
     inventory,    setInventory:    makeSet("inventory",    _setInventory),
     locations,    setLocations:    makeSet("locations",    _setLocations),
     recipeTypes,  setRecipeTypes:  makeSet("recipeTypes",  _setRecipeTypes),
+    poojaItems,   setPoojaItems:   makeSet("poojaItems",   _setPoojaItems),
+    poojaTemples, setPoojaTemples: makeSet("poojaTemples", _setPoojaTemples),
+    poojaDels,    setPoojaDels:    makeSet("poojaDels",    _setPoojaDels),
   };
 }
