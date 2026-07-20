@@ -1564,7 +1564,9 @@ function OrderForm({ctx,ord,onClose}){
     entries:(ord?.entries||[]).map(e=>({...e,baseQty:e.baseQty??e.qty,basePax:e.basePax??ord?.pax??null}))
   }));
   const [ne,setNe]=useState({recId:"",qty:""});
-  const [defLocId,setDefLocId]=useState(ord?.entries?.[0]?.locId?.toString()||"");
+  const madalayam=locations.find(l=>(l.name||"").toLowerCase().includes("madalayam"));
+  const [defLocId,setDefLocId]=useState(ord?.entries?.[0]?.locId?.toString()||madalayam?.id?.toString()||"");
+  const [defSession,setDefSession]=useState(ord?.entries?.[0]?.session||"Breakfast");
   const [recSearch,setRecSearch]=useState("");
   const [saveErr,setSaveErr]=useState("");
   const [entryErr,setEntryErr]=useState("");
