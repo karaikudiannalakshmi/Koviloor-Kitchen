@@ -831,12 +831,17 @@ function RecsPage({ctx}){
                 <td style={css.td}>
                   <div style={{display:"flex",gap:4}}>
                     <button style={css.btn("ghost",true)} title="Edit" onClick={()=>setModal({type:"recipe",rec:r})}>✏️</button>
-                    <button style={css.btn("ghost",true)} title="Clone & Edit" onClick={()=>{
-                      const clone={...r,id:Date.now(),name:r.name+" (Copy)",nameTamil:r.nameTamil?(r.nameTamil+" (நகல்)"):"",
-                        ingredients:[...(r.ingredients||[])],subLinks:[...(r.subLinks||[])],prepSteps:[...(r.prepSteps||[])]};
-                      setRecipes(p=>[...p,clone]);
-                      setTimeout(()=>setModal({type:"recipe",rec:clone}),50);
-                    }}>⧉</button>
+                    <button style={{...css.btn("ghost",true),color:"#0369A1",borderColor:"#0369A1",fontSize:10,padding:"3px 7px"}}
+                      title="Clone & Edit"
+                      onClick={()=>{
+                        const clone={...r,id:Date.now(),name:r.name+" (Copy)",
+                          nameTamil:r.nameTamil?(r.nameTamil+" (நகல்)"):"",
+                          ingredients:[...(r.ingredients||[])],
+                          subLinks:[...(r.subLinks||[])],
+                          prepSteps:[...(r.prepSteps||[])]};
+                        setRecipes(p=>[...p,clone]);
+                        setTimeout(()=>setModal({type:"recipe",rec:clone}),50);
+                      }}>📋 Clone</button>
                     <button style={css.btn("danger",true)} title="Delete" onClick={()=>setRecipes(p=>p.filter(x=>x.id!==r.id))}>🗑</button>
                   </div>
                 </td>
@@ -1558,7 +1563,8 @@ function OrderForm({ctx,ord,onClose}){
     name:"",date:TODAY,isTemplate:false,pax:"",...(ord||{}),
     entries:(ord?.entries||[]).map(e=>({...e,baseQty:e.baseQty??e.qty,basePax:e.basePax??ord?.pax??null}))
   }));
-  const [ne,setNe]=useState({locId:"",session:"Breakfast",recId:"",qty:""});
+  const [ne,setNe]=useState({recId:"",qty:""});
+  const [defLocId,setDefLocId]=useState(ord?.entries?.[0]?.locId?.toString()||"");
   const [recSearch,setRecSearch]=useState("");
   const [saveErr,setSaveErr]=useState("");
   const [entryErr,setEntryErr]=useState("");
@@ -1581,7 +1587,7 @@ function OrderForm({ctx,ord,onClose}){
   };
 
   const addEntry=()=>{
-    if(!ne.locId){setEntryErr(t("Select a location","இடம் தேர்வு செய்யவும்"));return;}
+    if(!defLocId){setEntryErr(t("Select a location first","முதலில் இடம் தேர்வு செய்யவும்"));return;}
     if(!ne.recId){setEntryErr(t("Select a recipe","சமையல் தேர்வு செய்யவும்"));return;}
     if(!ne.qty||+ne.qty<=0){setEntryErr(t("Enter a valid quantity","அளவு கொடுக்கவும்"));return;}
     setEntryErr("");
@@ -1589,7 +1595,7 @@ function OrderForm({ctx,ord,onClose}){
     const curPax=f.pax&&+f.pax>0?+f.pax:null;
     // Lock baseQty and basePax at the moment of adding
     const entry={
-      locId:+ne.locId,session:ne.session,recId:+ne.recId,
+      locId:+defLocId,session:defSession,recId:+ne.recId,
       qty:+ne.qty,baseQty:+ne.qty,basePax:curPax,
       yu:rec?.yieldUnit||"kg"
     };
@@ -1648,6 +1654,23 @@ function OrderForm({ctx,ord,onClose}){
         </div>
       </div>
 
+      {/* Location + Session for this order */}
+      <div style={{marginBottom:12,display:"flex",alignItems:"center",gap:12,background:P.highlight,padding:"8px 12px",borderRadius:8,flexWrap:"wrap"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:200}}>
+          <label style={{...css.lbl,margin:0,whiteSpace:"nowrap"}}>{t("Location","இடம்")}</label>
+          <select style={{...css.sel,flex:1}} value={defLocId} onChange={e=>setDefLocId(e.target.value)}>
+            <option value="">{t("-- Select --","-- தேர்வு --")}</option>
+            {locations.map(l=><option key={l.id} value={l.id}>{lang==="en"?l.name:l.nameTamil}</option>)}
+          </select>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:160}}>
+          <label style={{...css.lbl,margin:0,whiteSpace:"nowrap"}}>{t("Session","அமர்வு")}</label>
+          <select style={{...css.sel,flex:1}} value={defSession} onChange={e=>setDefSession(e.target.value)}>
+            {SESSIONS.map(s=><option key={s}>{s}</option>)}
+          </select>
+        </div>
+      </div>
+
       <label style={{display:"flex",alignItems:"center",gap:5,fontSize:12,cursor:"pointer",marginBottom:12}}>
         <input type="checkbox" checked={f.isTemplate} onChange={e=>setF({...f,isTemplate:e.target.checked,date:e.target.checked?"":f.date})}/>
         {t("Save as Template (no date)","மாதிரியாக சேமி")}
@@ -1656,11 +1679,8 @@ function OrderForm({ctx,ord,onClose}){
       {/* ── Add Entry Row ── */}
       <div style={{...css.sHead}}>{t("Order Entries","பதிவுகள்")}</div>
       <div style={{display:"flex",gap:6,flexWrap:"wrap",padding:10,background:P.highlight,borderRadius:8,marginBottom:6}}>
-        <select style={css.sel} value={ne.locId} onChange={e=>setNe({...ne,locId:e.target.value})}>
-          <option value="">{t("Location","இடம்")}</option>
-          {locations.map(l=><option key={l.id} value={l.id}>{lang==="en"?l.name:l.nameTamil}</option>)}
-        </select>
-        <select style={css.sel} value={ne.session} onChange={e=>setNe({...ne,session:e.target.value})}>{SESSIONS.map(s=><option key={s}>{s}</option>)}</select>
+
+
         <div style={{display:"flex",flexDirection:"column",gap:4,flex:2,minWidth:180}}>
           <input style={{...css.inp,fontSize:11}} placeholder={t("Search recipe...","சமையல் தேடு...")} value={recSearch} onChange={e=>{setRecSearch(e.target.value);setNe(n=>({...n,recId:""}));}}/>
           <select style={{...css.sel,width:"100%"}} value={ne.recId} onChange={e=>setNe({...ne,recId:e.target.value})}>
