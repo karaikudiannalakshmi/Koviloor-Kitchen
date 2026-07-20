@@ -212,23 +212,16 @@ const TODAY=new Date().toISOString().slice(0,10);
 function printHTML(title, htmlContent, extraHead="") {
   const css=`
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Tamil:wght@400;600;700&family=Noto+Sans:wght@400;600;700&display=swap');
-    *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-    body{font-family:'Noto Sans','Segoe UI',Arial,sans-serif;font-size:13px;color:#000;margin:20px;}
-    h2{font-size:16px;color:#000;border-bottom:2px solid #000;padding-bottom:5px;margin-bottom:10px;font-weight:700;}
-    h3{font-size:14px;color:#000;margin:14px 0 5px;font-weight:700;border-bottom:1px solid #000;padding-bottom:3px;}
-    h4{font-size:13px;color:#000;margin:10px 0 3px;font-weight:600;}
+    body{font-family:'Noto Sans','Segoe UI',Arial,sans-serif;font-size:13px;color:#111;margin:20px;}
+    h2{font-size:16px;color:#111;border-bottom:2px solid #111;padding-bottom:6px;margin-bottom:10px;font-weight:700;}
+    h3{font-size:14px;color:#333;margin:14px 0 5px;font-weight:700;}
+    h4{font-size:13px;color:#333;margin:10px 0 3px;}
     table{width:100%;border-collapse:collapse;margin-bottom:10px;}
-    th{background:#000;color:#fff;padding:5px 8px;text-align:left;font-size:12px;font-weight:700;}
-    td{padding:3px 6px;border-bottom:1px solid #BBB;font-size:13px;}
-    tr:nth-child(even) td{background:#F0F0F0;}
+    th{background:#222;color:white;padding:6px 8px;text-align:left;font-size:12px;}
+    td{padding:4px 6px;border-bottom:1px solid #DDD;font-size:13px;}
+    tr:nth-child(even) td{background:#F5F5F5;}
     .hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
-    @media print{
-      .no-print{display:none;}
-      body{margin:5mm;}
-      @page{margin:12mm;size:A4;}
-      table{page-break-inside:avoid;}
-      div{page-break-inside:avoid;}
-    }
+    @media print{.no-print{display:none;}body{margin:10px;}@page{margin:15mm;}}
   `;
   const date=new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
   const fullHtml='<!DOCTYPE html><html><head><meta charset="utf-8">'+extraHead+'<title>'+title+'</title><style>'+css+'</style></head><body>'
@@ -309,14 +302,12 @@ const INV0={
 
 // ── Expand a recipe's raw ingredients recursively via subLinks ────────────────
 // mainMult = how many times the base recipe is being made
-function expandRecipeIngs(rec, mainMult, recipes, ingredients, expandSubs=true, _visited=new Set()) {
-  // Guard against circular sub-recipe references
-  if (_visited.has(rec.id)) return [];
-  const visited = new Set(_visited); visited.add(rec.id);
-
+function expandRecipeIngs(rec, mainMult, recipes, ingredients, expandSubs=true) {
+  // expandSubs=false: sub-recipes shown as single line items (dish-wise report)
+  // expandSubs=true:  sub-recipes expanded into raw ingredients (shopping list, cost)
   const result = [];
 
-  // 1. Direct ingredients
+  // 1. Always show direct ingredients
   (rec.ingredients||[]).forEach(ing => {
     const d = ingredients.find(x => x.id === ing.iid); if (!d) return;
     const scaled = applyScaling(ing.qty, mainMult, d.scalingFactor, d.scalingBenchmark);
@@ -328,14 +319,16 @@ function expandRecipeIngs(rec, mainMult, recipes, ingredients, expandSubs=true, 
     const sub = recipes.find(r => r.id === link.subId); if (!sub) return;
     const scaledQty = link.qty * mainMult;
     if (!expandSubs) {
+      // Show sub-recipe as a single virtual ingredient line
       const virtualIng = {
         id: 'sub_'+sub.id, name: sub.name, nameTamil: sub.nameTamil||sub.name,
         category: 'sub', unit: sub.yieldUnit||link.unit, normCost: 0, isSubRecipe: true,
       };
       result.push({ d: virtualIng, qty: +scaledQty.toFixed(4), unit: sub.yieldUnit||link.unit, isSubRecipe: true });
     } else {
+      // Fully expand sub-recipe into raw ingredients
       const subMult = scaledQty / (sub.yield || 1);
-      expandRecipeIngs(sub, subMult, recipes, ingredients, true, visited).forEach(si => result.push(si));
+      expandRecipeIngs(sub, subMult, recipes, ingredients, true).forEach(si => result.push(si));
     }
   });
   return result;
@@ -382,24 +375,18 @@ function computeTotals(entries, recipes, ingredients, order, expandSubs=true) {
 // MAIN APP
 // ════════════════════════════════════════════════════════════════════
 function App(){
-  const getHashPage=()=>{
-    const h=window.location.hash.replace("#","");
-    return h||"ingredients";
-  };
+  const getHashPage=()=>{const h=window.location.hash.replace("#","");return h||"ingredients";};
   const [page,setPageState]=useState(getHashPage);
-  const setPage=(p)=>{
-    window.location.hash=p;
-    setPageState(p);
-  };
+  const setPage=(p)=>{window.location.hash=p;setPageState(p);};
   const [lang,setLang]=useState("en");
   const [modal,setModal]=useState(null);
 
-  // Sync page with browser hash (enables back/forward and multi-tab)
   useEffect(()=>{
     const onHash=()=>setPageState(window.location.hash.replace("#","")||"ingredients");
     window.addEventListener("hashchange",onHash);
     return()=>window.removeEventListener("hashchange",onHash);
   },[]);
+
   const {loaded,saveStatus,forceSave,ingredients,setIngredients,recipes,setRecipes,
     orders,setOrders,inventory,setInventory,locations,setLocations,recipeTypes,setRecipeTypes} = useKitchenData();
 
@@ -435,13 +422,13 @@ function App(){
         <div style={{padding:"10px 0"}}>
           {NAV.map(n=>(
             <div key={n.id}>
-              <a style={{...css.navItem(!n.children&&page===n.id),textDecoration:"none"}} href={"#"+n.id} onClick={e=>{if(n.children)e.preventDefault();else{e.preventDefault();setPage(n.id);}}}>
+              <div style={css.navItem(!n.children&&page===n.id)} href={"#"+n.id} onClick={e=>{if(n.children)e.preventDefault();else{e.preventDefault();setPage(n.id);}}}>
                 <span>{n.icon}</span><span>{t(n.en,n.ta)}</span>
-              </a>
+              </div>
               {n.children?.map(c=>(
-                <a key={c.id} style={{...css.navItem(page===c.id,true),textDecoration:"none",display:"flex"}} href={"#"+c.id} onClick={e=>{e.preventDefault();setPage(c.id);}}>
+                <div key={c.id} style={css.navItem(page===c.id,true)} href={"#"+c.id} onClick={e=>{e.preventDefault();setPage(c.id);}}>
                   <span style={{opacity:0.4}}>└</span><span>{t(c.en,c.ta)}</span>
-                </a>
+                </div>
               ))}
             </div>
           ))}
@@ -515,7 +502,7 @@ function IngsPage({ctx}){
     setTranslating(true); const BATCH=40; const results={};
     for(let bi=0;bi<needTranslation.length;bi+=BATCH){
       const batch=needTranslation.slice(bi,bi+BATCH);
-      setTransProgress("Translating "+(bi+1)+"–"+Math.min(bi+BATCH,needTranslation.length)+" of "+needTranslation.length+"...");
+      setTransProgress("Translating "+(bi+1)+"\u2013"+Math.min(bi+BATCH,needTranslation.length)+" of "+needTranslation.length+"...");
       try{
         const res=await fetch("/api/translate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({names:batch.map(x=>x.name)})});
         const data=await res.json(); if(data.translations)Object.assign(results,data.translations);
@@ -596,14 +583,7 @@ function IngsPage({ctx}){
   const visible=cat==="all"?ingredients:ingredients.filter(i=>i.category===cat);
 
   const saveEdit=()=>{
-    const updated={...ef};
-    // Convert numeric fields — omit (don't set to undefined) if blank
-    updated.normCost = ef.normCost ? +ef.normCost : 0;
-    if(ef.cutYield) updated.cutYield=+ef.cutYield; else delete updated.cutYield;
-    if(ef.cutUnit) updated.cutUnit=ef.cutUnit; else delete updated.cutUnit;
-    if(ef.scalingFactor) updated.scalingFactor=+ef.scalingFactor; else delete updated.scalingFactor;
-    if(ef.scalingBenchmark) updated.scalingBenchmark=+ef.scalingBenchmark; else delete updated.scalingBenchmark;
-    setIngredients(p=>p.map(i=>i.id===editId?updated:i));
+    setIngredients(p=>p.map(i=>i.id===editId?{...ef,normCost:ef.normCost?+ef.normCost:undefined,cutYield:ef.cutYield?+ef.cutYield:undefined,scalingFactor:ef.scalingFactor?+ef.scalingFactor:undefined,scalingBenchmark:ef.scalingBenchmark?+ef.scalingBenchmark:undefined}:i));
     setEditId(null);
   };
   const addNew=()=>{
@@ -689,11 +669,11 @@ function IngsPage({ctx}){
 function RecsPage({ctx}){
   const {recipes,setRecipes,ingredients,recipeTypes,lang,setModal}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
+  const [showSub,setShowSub]=useState(false);
   const [q,setQ]=useState("");
   const [typeF,setTypeF]=useState("all");
   const [translating,setTranslating]=useState(false);
   const [transProgress,setTransProgress]=useState("");
-  const recFileRef=useRef();
 
   const exportRecipes=()=>{
     const data=recipes.map(r=>({
@@ -759,13 +739,13 @@ function RecsPage({ctx}){
     alert("Done! Translated "+Object.keys(results).length+" recipes.");
   };
 
-  const filterFn=r=>{
-    if(typeF!=="all"&&r.recipeType!==typeF) return false;
-    const qq=q.toLowerCase();
-    return !qq||r.name.toLowerCase().includes(qq)||(r.nameTamil||"").toLowerCase().includes(qq);
-  };
-  const mainRecs = recipes.filter(r=>!r.isSubRecipe).filter(filterFn);
-  const subRecs  = recipes.filter(r=>r.isSubRecipe).filter(filterFn);
+  const vis=recipes
+    .filter(r=>showSub||!r.isSubRecipe)
+    .filter(r=>typeF==="all"||r.recipeType===typeF)
+    .filter(r=>{
+      const qq=q.toLowerCase();
+      return !qq||r.name.toLowerCase().includes(qq)||r.nameTamil.includes(q);
+    });
 
   const usedTypes=[...new Set(recipes.map(r=>r.recipeType).filter(Boolean))];
 
@@ -773,7 +753,10 @@ function RecsPage({ctx}){
     <div>
       <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"center",flexWrap:"wrap"}}>
         <input style={{...css.inp,maxWidth:220}} placeholder={t("Search recipes...","தேடு...")} value={q} onChange={e=>setQ(e.target.value)}/>
-        
+        <label style={{display:"flex",alignItems:"center",gap:5,fontSize:12,cursor:"pointer",whiteSpace:"nowrap"}}>
+          <input type="checkbox" checked={showSub} onChange={e=>setShowSub(e.target.checked)}/>
+          {t("Include Sub-Recipes","துணை காட்டு")}
+        </label>
         <div style={{marginLeft:"auto",display:"flex",gap:6}}>
           <button style={css.btn("ghost",true)} onClick={()=>setModal({type:"recipeTypes"})}>⚙️ {t("Manage Types","வகை நிர்வகி")}</button>
           <button style={css.btn("ghost",true)} onClick={exportRecipes}>⬇️ {t("Export Names","பெயர் ஏற்று")}</button>
@@ -792,15 +775,8 @@ function RecsPage({ctx}){
         <span style={{width:10,height:10,background:"#2563EB",borderRadius:2,display:"inline-block",flexShrink:0}}/>
         {t("Blue rows have no ingredients — click to edit","நீல வரிசைகளில் பொருட்கள் இல்லை — திருத்த கிளிக்")}
       </div>
-      {([
-          {label:t("Recipes","சமையல் குறிப்புகள்"),list:mainRecs,color:P.deepBrown},
-          {label:t("Sub-Recipes","துணை சமையல்"),list:subRecs,color:P.purple},
-        ]).map(({label,list,color})=>(
-        <div key={label} style={{...css.card,padding:0,overflow:"hidden",marginBottom:16}}>
-          <div style={{padding:"8px 14px",background:color,color:"white",fontWeight:700,fontSize:13}}>
-            {label} <span style={{fontWeight:400,fontSize:11,opacity:0.8}}>({list.length})</span>
-          </div>
-          <table style={css.table}>
+      <div style={{...css.card,padding:0,overflow:"hidden"}}>
+        <table style={css.table}>
           <thead><tr>
             <th style={css.th}>#</th>
             <th style={css.th}>{t("Recipe Name","சமையல் பெயர்")}</th>
@@ -813,8 +789,8 @@ function RecsPage({ctx}){
             <th style={css.th}></th>
           </tr></thead>
           <tbody>
-            {list.length===0&&<tr><td colSpan={8} style={{...css.td,textAlign:"center",color:P.muted,padding:20}}>{t("No recipes found.","சமையல் இல்லை.")}</td></tr>}
-            {list.map((r,i)=>{
+            {vis.length===0&&<tr><td colSpan={8} style={{...css.td,textAlign:"center",color:P.muted,padding:20}}>{t("No recipes found.","சமையல் இல்லை.")}</td></tr>}
+            {vis.map((r,i)=>{
               const noIngs=!(r.ingredients||[]).length&&!(r.subLinks||[]).length;
               const rowBg=noIngs?"#DBEAFE":i%2===0?P.white:P.highlight;
               const hoverBg=noIngs?"#BFDBFE":"#FDE8C4";
@@ -846,17 +822,6 @@ function RecsPage({ctx}){
                 <td style={css.td}>
                   <div style={{display:"flex",gap:4}}>
                     <button style={css.btn("ghost",true)} title="Edit" onClick={()=>setModal({type:"recipe",rec:r})}>✏️</button>
-                    <button style={{...css.btn("ghost",true),color:"#0369A1",borderColor:"#0369A1",fontSize:10,padding:"3px 7px"}}
-                      title="Clone & Edit"
-                      onClick={()=>{
-                        const clone={...r,id:Date.now(),name:r.name+" (Copy)",
-                          nameTamil:r.nameTamil?(r.nameTamil+" (நகல்)"):"",
-                          ingredients:[...(r.ingredients||[])],
-                          subLinks:[...(r.subLinks||[])],
-                          prepSteps:[...(r.prepSteps||[])]};
-                        setRecipes(p=>[...p,clone]);
-                        setTimeout(()=>setModal({type:"recipe",rec:clone}),50);
-                      }}>📋 Clone</button>
                     <button style={css.btn("danger",true)} title="Delete" onClick={()=>setRecipes(p=>p.filter(x=>x.id!==r.id))}>🗑</button>
                   </div>
                 </td>
@@ -864,9 +829,8 @@ function RecsPage({ctx}){
             );})}
           </tbody>
         </table>
-        </div>
-      ))}
-      <div style={{fontSize:11,color:P.muted,marginTop:4}}>{mainRecs.length+subRecs.length} {t("recipe(s) shown","சமையல்கள் காட்டப்படுகின்றன")} — {t("click name to view / edit details","பெயரை சொடுக்கி விவரம் காண்க")}</div>
+      </div>
+      <div style={{fontSize:11,color:P.muted,marginTop:4}}>{vis.length} {t("recipe(s) shown","சமையல்கள் காட்டப்படுகின்றன")} — {t("click name to view / edit details","பெயரை சொடுக்கி விவரம் காண்க")}</div>
     </div>
   );
 }
@@ -1365,7 +1329,15 @@ function RecForm({ctx,rec,onClose}){
 function OrdersPage({ctx}){
   const {orders,setOrders,locations,recipes,ingredients,lang,setModal}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
-  const real=orders.filter(o=>!o.isTemplate);
+  const SESS_ORDER={Breakfast:0,Lunch:1,Snack:2,Dinner:3};
+  // Sort by date desc, then by session order
+  const sortOrders=arr=>[...arr].sort((a,b)=>{
+    if(b.date!==a.date) return b.date.localeCompare(a.date);
+    const sa=Math.min(...(a.entries||[]).map(e=>SESS_ORDER[e.session]??9));
+    const sb=Math.min(...(b.entries||[]).map(e=>SESS_ORDER[e.session]??9));
+    return sa-sb;
+  });
+  const real=sortOrders(orders.filter(o=>!o.isTemplate));
   const tpls=orders.filter(o=>o.isTemplate);
   const [dateQ,setDateQ]=useState("");
   const [nameQ,setNameQ]=useState("");
@@ -1578,13 +1550,19 @@ function OrderForm({ctx,ord,onClose}){
     name:"",date:TODAY,isTemplate:false,pax:"",...(ord||{}),
     entries:(ord?.entries||[]).map(e=>({...e,baseQty:e.baseQty??e.qty,basePax:e.basePax??ord?.pax??null}))
   }));
-  const [ne,setNe]=useState({recId:"",qty:""});
   const madalayam=locations.find(l=>(l.name||"").toLowerCase().includes("madalayam"));
   const [defLocId,setDefLocId]=useState(ord?.entries?.[0]?.locId?.toString()||madalayam?.id?.toString()||"");
   const [defSession,setDefSession]=useState(ord?.entries?.[0]?.session||"Breakfast");
+  const [ne,setNe]=useState({recId:"",qty:""});
   const [recSearch,setRecSearch]=useState("");
   const [saveErr,setSaveErr]=useState("");
   const [entryErr,setEntryErr]=useState("");
+
+  // When session changes — update ALL existing entries to new session
+  const changeSession=(sess)=>{
+    setDefSession(sess);
+    setF(x=>({...x,entries:x.entries.map(e=>({...e,session:sess}))}));
+  };
 
   const filteredRecs=recipes
     .filter(r=>!r.isSubRecipe)
@@ -1604,7 +1582,7 @@ function OrderForm({ctx,ord,onClose}){
   };
 
   const addEntry=()=>{
-    if(!defLocId){setEntryErr(t("Select a location first","முதலில் இடம் தேர்வு செய்யவும்"));return;}
+    if(!defLocId){setEntryErr(t("Select a location","இடம் தேர்வு செய்யவும்"));return;}
     if(!ne.recId){setEntryErr(t("Select a recipe","சமையல் தேர்வு செய்யவும்"));return;}
     if(!ne.qty||+ne.qty<=0){setEntryErr(t("Enter a valid quantity","அளவு கொடுக்கவும்"));return;}
     setEntryErr("");
@@ -1671,9 +1649,9 @@ function OrderForm({ctx,ord,onClose}){
         </div>
       </div>
 
-      {/* Location + Session for this order */}
-      <div style={{marginBottom:12,display:"flex",alignItems:"center",gap:12,background:P.highlight,padding:"8px 12px",borderRadius:8,flexWrap:"wrap"}}>
-        <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:200}}>
+      {/* Order-level Location + Session */}
+      <div style={{display:"flex",gap:12,alignItems:"center",background:P.highlight,padding:"8px 12px",borderRadius:8,marginBottom:12,flexWrap:"wrap"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:180}}>
           <label style={{...css.lbl,margin:0,whiteSpace:"nowrap"}}>{t("Location","இடம்")}</label>
           <select style={{...css.sel,flex:1}} value={defLocId} onChange={e=>setDefLocId(e.target.value)}>
             <option value="">{t("-- Select --","-- தேர்வு --")}</option>
@@ -1682,7 +1660,7 @@ function OrderForm({ctx,ord,onClose}){
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:160}}>
           <label style={{...css.lbl,margin:0,whiteSpace:"nowrap"}}>{t("Session","அமர்வு")}</label>
-          <select style={{...css.sel,flex:1}} value={defSession} onChange={e=>setDefSession(e.target.value)}>
+          <select style={{...css.sel,flex:1}} value={defSession} onChange={e=>changeSession(e.target.value)}>
             {SESSIONS.map(s=><option key={s}>{s}</option>)}
           </select>
         </div>
@@ -1696,7 +1674,6 @@ function OrderForm({ctx,ord,onClose}){
       {/* ── Add Entry Row ── */}
       <div style={{...css.sHead}}>{t("Order Entries","பதிவுகள்")}</div>
       <div style={{display:"flex",gap:6,flexWrap:"wrap",padding:10,background:P.highlight,borderRadius:8,marginBottom:6}}>
-
 
         <div style={{display:"flex",flexDirection:"column",gap:4,flex:2,minWidth:180}}>
           <input style={{...css.inp,fontSize:11}} placeholder={t("Search recipe...","சமையல் தேடு...")} value={recSearch} onChange={e=>{setRecSearch(e.target.value);setNe(n=>({...n,recId:""}));}}/>
@@ -1805,45 +1782,26 @@ function RepDish({ctx}){
       byRec[e.recId].totalMult+=e.qty/(rec.yield||1);
       byRec[e.recId].totalQty+=e.qty;
     });
-    const recByNameLC=new Map(recipes.map(r=>[r.name.toLowerCase().trim(),r]));
     const recs=Object.values(byRec).map(item=>{
-      const rawIngs=sortIngs(mergeIngs(expandRecipeIngs(item.rec,item.totalMult,recipes,ingredients,false)));
-      // Detect sub-recipes: either marked isSubRecipe OR ingredient name matches a recipe
-      const subSections=[];
-      const seen=new Set();
-      rawIngs.forEach(r=>{
-        const matchRec=r.isSubRecipe
-          ?recipes.find(x=>x.name===r.d.name)
-          :recByNameLC.get(r.d.name.toLowerCase().trim());
-        if(matchRec&&!seen.has(matchRec.id)){
-          seen.add(matchRec.id);
-          subSections.push({
-            d:{...r.d,name:matchRec.name,nameTamil:matchRec.nameTamil||r.d.nameTamil,isSubRecipe:true},
-            qty:r.qty,unit:r.unit,
-            ings:sortIngs(mergeIngs(expandRecipeIngs(matchRec,r.qty/(matchRec.yield||1),recipes,ingredients,false)))
-          });
-        }
-      });
-      // Mark ingredient rows that are sub-recipes
-      const ings=rawIngs.map(r=>{
-        const isS=r.isSubRecipe||recByNameLC.has(r.d.name.toLowerCase().trim());
-        return isS?{...r,isSubRecipe:true,d:{...r.d,isSubRecipe:true}}:r;
+      const ings=sortIngs(mergeIngs(expandRecipeIngs(item.rec,item.totalMult,recipes,ingredients,false)));
+      const subSections=ings.filter(r=>r.isSubRecipe).map(r=>{
+        const subRec=recipes.find(x=>x.name===r.d.name);
+        return{d:r.d,qty:r.qty,unit:r.unit,
+          ings:subRec?sortIngs(mergeIngs(expandRecipeIngs(subRec,r.qty/(subRec.yield||1),recipes,ingredients,false))):[]};
       });
       return{...item,ings,subSections};
     });
     return{session:sess,recs};
   }).filter(sd=>sd.recs.length>0);
 
-  const [activeSess,setActiveSess]=useState("All");
-  const visibleSess=activeSess==="All"?sessData:sessData.filter(sd=>sd.session===activeSess);
-  const hasData=visibleSess.length>0;
+  const hasData=sessData.length>0;
 
   // Print font includes Noto Sans Tamil for Tamil rendering
   const PRINT_FONTS='<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Tamil:wght@400;600;700&family=Noto+Sans:wght@400;600;700&display=swap"/>';
 
   const printSession=(sd)=>{
     let recNo=0;
-    const recBlocks=sd.recs.map(({rec,totalQty,ings,subSections},ri)=>{
+    const recBlocks=sd.recs.map(({rec,totalQty,ings,subSections})=>{
       recNo++;
       const ingRows=ings.map((r,i)=>{
         const isSub=r.isSubRecipe;
@@ -1920,26 +1878,8 @@ function RepDish({ctx}){
         <div><label style={css.lbl}>{t('Date','தேதி')}</label><input type="date" style={{...css.inp,width:160}} value={dt} onChange={e=>setDt(e.target.value)}/></div>
         {entries.length>0&&<button style={css.btn('info',true)} onClick={()=>setModal({type:'postIssues',date:dt})}>📦 {t('Post Issues','சரக்கு போடு')}</button>}
       </ReportBar>
-      {/* Session filter tabs */}
-      <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}}>
-        {["All",...SESSIONS].map(s=>{
-          const hasOrders=s==="All"?sessData.length>0:sessData.some(sd=>sd.session===s);
-          if(!hasOrders&&s!=="All")return null;
-          return(
-            <button key={s} style={{
-              ...css.btn(activeSess===s?"primary":"ghost",true),
-              borderColor:s!=="All"?(SCOLOR[s]||P.muted):"#DCC88A",
-              color:activeSess===s?"white":(s!=="All"?SCOLOR[s]:P.deepBrown),
-              background:activeSess===s?(s!=="All"?(SCOLOR[s]||P.saffron):P.saffron):"transparent",
-              fontWeight:activeSess===s?700:400,
-            }} onClick={()=>setActiveSess(s)}>
-              {s==="All"?t("All Sessions","அனைத்து"):s}
-            </button>
-          );
-        })}
-      </div>
       {!hasData&&<div style={{color:P.muted,textAlign:'center',padding:24}}>{t('No orders for this date.','இந்த தேதியில் ஆர்டர் இல்லை.')}</div>}
-      {visibleSess.map(sd=>(
+      {sessData.map(sd=>(
         <div key={sd.session} style={{...css.card,marginBottom:16,border:'1px solid #333'}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14,flexWrap:'wrap',gap:8}}>
             <div style={{display:'flex',alignItems:'center',gap:10}}>
@@ -1953,27 +1893,21 @@ function RepDish({ctx}){
           </div>
           {sd.recs.map(({rec,totalQty,ings,subSections},ri)=>(
             <div key={rec.id} style={{marginBottom:20}}>
-              {/* Main recipe header */}
               <div style={{display:'flex',alignItems:'baseline',gap:8,borderBottom:'2px solid #111',paddingBottom:5,marginBottom:6}}>
                 <span style={{fontSize:11,color:'#777',fontWeight:600,minWidth:20}}>{ri+1}</span>
                 <span style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:'#111',flex:1}}>{n(rec)}</span>
                 <span style={{fontSize:18,fontWeight:800,color:'#111',whiteSpace:'nowrap'}}>{totalQty.toFixed(3)} {rec.yieldUnit}</span>
               </div>
-              {/* Direct + sub-recipe line items */}
-              <div style={{border:'1px solid #DDD',borderRadius:4,overflow:'hidden',marginBottom:subSections&&subSections.length?10:0}}>
+              <div style={{border:'1px solid #DDD',borderRadius:4,overflow:'hidden',marginBottom:subSections&&subSections.length?6:0}}>
                 {ings.map((row,i)=><IngRow key={row.d.id} num={i+1} name={n(row.d)} qty={row.qty} unit={row.unit} isSub={row.isSubRecipe} shade={i%2===1}/>)}
               </div>
-              {/* Sub-recipe breakdowns as sub-headings immediately below */}
-              {(subSections||[]).map(({d,qty,unit,ings:sings},si)=>(
-                <div key={d.id} style={{marginBottom:8,marginLeft:0}}>
-                  <div style={{display:'flex',alignItems:'baseline',gap:8,
-                    background:'#F5F5F5',border:'1px solid #CCC',borderLeft:'4px solid #555',
-                    padding:'5px 10px',marginBottom:4}}>
-                    <span style={{fontSize:11,color:'#777',fontWeight:600,minWidth:28}}>{ri+1}.{si+1}</span>
-                    <span style={{fontFamily:"'Playfair Display',serif",fontSize:13,fontWeight:700,color:'#333',flex:1}}>{n(d)} *</span>
-                    <span style={{fontSize:14,fontWeight:800,color:'#333',whiteSpace:'nowrap'}}>{qty.toFixed(3)} {unit}</span>
+              {(subSections||[]).map(({d,qty,unit,ings:sings})=>(
+                <div key={d.id} style={{marginBottom:6,marginLeft:20,borderLeft:'2px solid #888',padding:'6px 10px',background:'#FAFAFA',borderRadius:'0 4px 4px 0'}}>
+                  <div style={{display:'flex',alignItems:'baseline',gap:8,borderBottom:'1px solid #AAA',paddingBottom:3,marginBottom:4}}>
+                    <span style={{fontSize:13,fontWeight:700,flex:1}}>{n(d)} *</span>
+                    <span style={{fontSize:14,fontWeight:800,whiteSpace:'nowrap'}}>{qty.toFixed(3)} {unit}</span>
                   </div>
-                  <div style={{border:'1px solid #DDD',borderTop:'none',borderRadius:'0 0 4px 4px',overflow:'hidden',marginLeft:0}}>
+                  <div style={{border:'1px solid #DDD',borderRadius:4,overflow:'hidden'}}>
                     {sings.map((row,i)=><IngRow key={row.d.id} num={i+1} name={n(row.d)} qty={row.qty} unit={row.unit} isSub={false} shade={i%2===1}/>)}
                   </div>
                 </div>
@@ -2104,22 +2038,12 @@ function RepShop({ctx}){
   const [rLang,setRLang]=useState(gLang);
   const t=(en,ta)=>rLang==="en"?en:ta;
   const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
-  const [fromDate,setFromDate]=useState(TODAY);
-  const [toDate,setToDate]=useState(TODAY);
+  const [dates,setDates]=useState([TODAY]);
 
-  // Generate all dates between from and to (inclusive)
-  const sortedDates=useMemo(()=>{
-    const dates=[];
-    const start=new Date(fromDate);
-    const end=new Date(toDate);
-    if(start>end)return[fromDate];
-    const cur=new Date(start);
-    while(cur<=end){
-      dates.push(cur.toISOString().slice(0,10));
-      cur.setDate(cur.getDate()+1);
-    }
-    return dates;
-  },[fromDate,toDate]);
+  const addDate=()=>{if(dates.length<7)setDates(d=>[...d,TODAY]);};
+  const removeDate=i=>setDates(d=>d.filter((_,j)=>j!==i));
+  const changeDate=(i,v)=>setDates(d=>d.map((x,j)=>j===i?v:x));
+  const sortedDates=[...new Set(dates)].sort();
 
   const getStock=iid=>{
     const bought=inventory.purchases.filter(x=>x.iid===iid).reduce((s,x)=>s+x.qty,0);
@@ -2196,25 +2120,22 @@ function RepShop({ctx}){
 
   // Active session tab
   const [activeTab,setActiveTab]=useState("All");
-  const {byDate,combined,allIngs}=useMemo(()=>buildData(activeTab),[activeTab,sortedDates,orders,recipes,ingredients]);
+  const {byDate,combined,allIngs}=useMemo(()=>buildData(activeTab),[activeTab,dates,orders,recipes,ingredients]);
   const hasData=allIngs.length>0;
 
   return(
     <div>
       <ReportBar onPrint={null} onExport={null} lang={rLang} setLang={setRLang}>
-        <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap"}}>
-          <div>
-            <label style={css.lbl}>{t("From","இருந்து")}</label>
-            <input type="date" style={{...css.inp,width:148}} value={fromDate}
-              onChange={e=>{setFromDate(e.target.value);if(e.target.value>toDate)setToDate(e.target.value);}}/>
-          </div>
-          <div>
-            <label style={css.lbl}>{t("To","வரை")}</label>
-            <input type="date" style={{...css.inp,width:148}} value={toDate}
-              onChange={e=>{setToDate(e.target.value);if(e.target.value<fromDate)setFromDate(e.target.value);}}/>
-          </div>
-          <div style={{fontSize:11,color:P.muted,paddingBottom:6}}>
-            {sortedDates.length} {t("day(s)","நாள்")}
+        <div>
+          <label style={css.lbl}>{t("Dates (up to 7)","தேதிகள்")}</label>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+            {dates.map((d,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:3}}>
+                <input type="date" style={{...css.inp,width:148}} value={d} onChange={e=>changeDate(i,e.target.value)}/>
+                {dates.length>1&&<button style={css.btn("danger",true)} onClick={()=>removeDate(i)}>✕</button>}
+              </div>
+            ))}
+            {dates.length<7&&<button style={css.btn("ghost",true)} onClick={addDate}>{"+ "+t("Add Date","தேதி சேர்")}</button>}
           </div>
         </div>
       </ReportBar>
@@ -2254,19 +2175,19 @@ function RepShop({ctx}){
                   const tb=Math.max(0,tot-stk);
                   const cells=sortedDates.map(dt=>{const v=byDate[dt][ing.id];return"<td style='text-align:right'>"+(v?v.qty.toFixed(2)+" "+v.unit:"—")+"</td>";}).join("");
                   return"<tr><td><strong>"+n(ing)+"</strong></td>"+cells
-                    +"<td style='text-align:right;font-weight:700'>"+tot.toFixed(2)+" "+unit+"</td>"
+                    +"<td style='text-align:right;background:#fffbe8'><strong>"+tot.toFixed(2)+" "+unit+"</strong></td>"
                     +"<td style='text-align:right'>"+stk.toFixed(2)+" "+unit+"</td>"
-                    +"<td style='text-align:right;font-weight:700'>"+(tb>0?tb.toFixed(2)+" "+unit:"✓")+"</td></tr>";
+                    +"<td style='text-align:right;color:"+(tb>0?"#C0392B":"#1A7A40")+"'><strong>"+(tb>0?tb.toFixed(2)+" "+unit:"✓ OK")+"</strong></td></tr>";
                 }).join("");
-                return"<h3>"+CATLABEL[cat]+"</h3>"
+                return"<h3>"+CATICON[cat]+" "+CATLABEL[cat]+"</h3>"
                   +"<table><thead><tr><th>"+t("Ingredient","பொருள்")+"</th>"+dateCols
                   +"<th style='text-align:right'>"+t("Total","மொத்தம்")+"</th>"
                   +"<th style='text-align:right'>"+t("In Stock","கையிருப்பு")+"</th>"
-                  +"<th style='text-align:right;'>"+t("To Buy","வாங்க")+"</th>"
+                  +"<th style='text-align:right'>"+t("To Buy","வாங்க")+"</th>"
                   +"</tr></thead><tbody>"+rows+"</tbody></table>";
               }).join("");
               const label=activeTab==="All"?t("All Sessions","அனைத்து அமர்வு"):activeTab;
-              printHTML(t("Shopping List","கொள்முதல் பட்டியல்")+" — "+label+" ("+sortedDates.join(", ")+")",
+              printHTML("Shopping List — "+label+" ("+sortedDates.join(", ")+")",
                 "<p style='color:#9B7355;margin:0 0 12px;font-size:12px'>"+t("Session","அமர்வு")+": "+label+" | "+t("Dates","தேதிகள்")+": "+sortedDates.join(" · ")+"</p>"+catBlocks);
             }}>🖨 {t("Print","அச்சு")}</button>
           </div>
@@ -2717,7 +2638,7 @@ function RepCost({ctx}){
                           <td style={css.td}><strong>{rLang==="en"?row.d.name:row.d.nameTamil}</strong></td>
                           <td style={css.td}><span style={css.badge(ccol)}>{row.d.category}</span></td>
                           <td style={{...css.td,textAlign:"right"}}>{row.qty.toFixed(2)} {row.unit}</td>
-                          <td style={{...css.td,textAlign:"right",fontSize:11,color:row.d.normCost?P.muted:"#FCA5A5"}}>{row.d.normCost?("₹"+row.d.normCost+"/"+row.unit):"no cost set"}</td>
+                          <td style={{...css.td,textAlign:"right",fontSize:11,color:P.muted}}>{row.d.normCost?("₹"+row.d.normCost+"/"+row.unit):"—"}</td>
                           <td style={{...css.td,textAlign:"right"}}>{row.lineCost>0?<strong style={{color:P.success}}>₹{row.lineCost.toFixed(2)}</strong>:<span style={{color:"#CCC"}}>—</span>}</td>
                           <td style={{...css.td,textAlign:"right",fontSize:10,color:P.muted}}>{pct>0?pct.toFixed(1)+"%":"—"}</td>
                         </tr>
