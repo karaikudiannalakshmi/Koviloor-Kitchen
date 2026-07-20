@@ -382,9 +382,24 @@ function computeTotals(entries, recipes, ingredients, order, expandSubs=true) {
 // MAIN APP
 // ════════════════════════════════════════════════════════════════════
 function App(){
-  const [page,setPage]=useState("ingredients");
+  const getHashPage=()=>{
+    const h=window.location.hash.replace("#","");
+    return h||"ingredients";
+  };
+  const [page,setPageState]=useState(getHashPage);
+  const setPage=(p)=>{
+    window.location.hash=p;
+    setPageState(p);
+  };
   const [lang,setLang]=useState("en");
   const [modal,setModal]=useState(null);
+
+  // Sync page with browser hash (enables back/forward and multi-tab)
+  useEffect(()=>{
+    const onHash=()=>setPageState(window.location.hash.replace("#","")||"ingredients");
+    window.addEventListener("hashchange",onHash);
+    return()=>window.removeEventListener("hashchange",onHash);
+  },[]);
   const {loaded,saveStatus,forceSave,ingredients,setIngredients,recipes,setRecipes,
     orders,setOrders,inventory,setInventory,locations,setLocations,recipeTypes,setRecipeTypes} = useKitchenData();
 
@@ -420,13 +435,13 @@ function App(){
         <div style={{padding:"10px 0"}}>
           {NAV.map(n=>(
             <div key={n.id}>
-              <div style={css.navItem(!n.children&&page===n.id)} onClick={()=>{if(!n.children)setPage(n.id)}}>
+              <a style={{...css.navItem(!n.children&&page===n.id),textDecoration:"none"}} href={"#"+n.id} onClick={e=>{if(n.children)e.preventDefault();else{e.preventDefault();setPage(n.id);}}}>
                 <span>{n.icon}</span><span>{t(n.en,n.ta)}</span>
-              </div>
+              </a>
               {n.children?.map(c=>(
-                <div key={c.id} style={css.navItem(page===c.id,true)} onClick={()=>setPage(c.id)}>
+                <a key={c.id} style={{...css.navItem(page===c.id,true),textDecoration:"none",display:"flex"}} href={"#"+c.id} onClick={e=>{e.preventDefault();setPage(c.id);}}>
                   <span style={{opacity:0.4}}>└</span><span>{t(c.en,c.ta)}</span>
-                </div>
+                </a>
               ))}
             </div>
           ))}
