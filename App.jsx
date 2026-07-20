@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react"; 
 import { useKitchenData } from "./useKitchenData.js";
 import { RTYPE_SEED } from "./seeds.js";
 import * as XLSX from "xlsx";
@@ -593,7 +593,7 @@ function IngsPage({ctx}){
   const visible=cat==="all"?ingredients:ingredients.filter(i=>i.category===cat);
 
   const saveEdit=()=>{
-    setIngredients(p=>p.map(i=>i.id===editId?{...ef,normCost:ef.normCost?+ef.normCost:undefined,cutYield:ef.cutYield?+ef.cutYield:undefined,scalingFactor:ef.scalingFactor?+ef.scalingFactor:undefined,scalingBenchmark:ef.scalingBenchmark?+ef.scalingBenchmark:undefined}:i));
+    setIngredients(p=>p.map(i=>i.id===editId?{...ef,normCost:ef.normCost?+ef.normCost:0}:i));
     setEditId(null);
   };
   const addNew=()=>{
@@ -1613,7 +1613,7 @@ function OrderForm({ctx,ord,onClose}){
     if(!f.name){setSaveErr(t("Please enter an order name","ஆர்டர் பெயர் கொடுக்கவும்"));return;}
     if(!f.isTemplate&&!f.date){setSaveErr(t("Please select a date","தேதி தேர்வு செய்யவும்"));return;}
     setSaveErr("");
-    const toSave={...f,pax:f.pax?+f.pax:undefined};
+    const toSave={...f,pax:f.pax?+f.pax:0};
     if(ord)setOrders(p=>p.map(o=>o.id===ord.id?{...toSave,id:ord.id}:o));
     else setOrders(p=>[...p,{...toSave,id:Date.now()}]);
     onClose();
