@@ -2050,6 +2050,15 @@ function RepShop({ctx}){
   const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
   const [fromDate,setFromDate]=useState(TODAY);
   const [toDate,setToDate]=useState(TODAY);
+  // Ingredients to exclude from purchase order (AC pre-cut veg, Milk, etc.)
+  const EXCLUDE_PREFIXES=["AC ","AC-"];
+  const EXCLUDE_NAMES=["milk","water for dal","water"];
+  const isExcluded=(name)=>{
+    const n=(name||"").toLowerCase().trim();
+    if(EXCLUDE_NAMES.includes(n))return true;
+    if(EXCLUDE_PREFIXES.some(p=>name.startsWith(p)))return true;
+    return false;
+  };
 
   const sortedDates=useMemo(()=>{
     const dates=[]; const start=new Date(fromDate); const end=new Date(toDate);
@@ -2106,6 +2115,7 @@ function RepShop({ctx}){
     const allIngIds=[...new Set(sortedDates.flatMap(dt=>Object.keys(byDate[dt]).map(Number)))];
     const allIngs=allIngIds
       .map(id=>ingredients.find(x=>x.id===id)).filter(Boolean)
+      .filter(ing=>!isExcluded(ing.name))
       .sort((a,b)=>CATS.indexOf(a.category)-CATS.indexOf(b.category)||a.name.localeCompare(b.name));
     return {byDate,combined,allIngs};
   };
