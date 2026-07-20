@@ -2074,6 +2074,15 @@ function RepShop({ctx}){
   const SESSION_OPTS=["All",...SESSIONS];
 
   // Compute ingredient totals for a given session filter and date list
+  // Normalise qty to ingredient's base unit to avoid mixing g/kg, ml/L
+  const cvtUnit=(qty,from,to)=>{
+    if(!from||!to||from===to)return qty;
+    if(from==="g"&&to==="kg")return qty/1000;
+    if(from==="kg"&&to==="g")return qty*1000;
+    if(from==="ml"&&to==="L")return qty/1000;
+    if(from==="L"&&to==="ml")return qty*1000;
+    return qty;
+  };
   const buildData=(sessFilter)=>{
     const byDate={};
     sortedDates.forEach(dt=>{
@@ -2082,15 +2091,16 @@ function RepShop({ctx}){
         .flatMap(o=>o.entries.filter(e=>sessFilter==="All"||e.session===sessFilter).map(e=>({...e,_order:o})));
       computeTotals(ents,recipes,ingredients).forEach(r=>{
         const id=r.d.id;
-        if(!byDate[dt][id])byDate[dt][id]={d:r.d,qty:0,unit:r.unit};
-        byDate[dt][id].qty+=r.qty;
+        const baseUnit=r.d.unit||r.unit;
+        if(!byDate[dt][id])byDate[dt][id]={d:r.d,qty:0,unit:baseUnit};
+        byDate[dt][id].qty+=cvtUnit(r.qty,r.unit,baseUnit);
       });
     });
     const combined={};
     sortedDates.forEach(dt=>{
       Object.values(byDate[dt]).forEach(r=>{
         if(!combined[r.d.id])combined[r.d.id]={d:r.d,qty:0,unit:r.unit};
-        combined[r.d.id].qty+=r.qty;
+        combined[r.d.id].qty+=convertUnit(r.qty,r.unit,combined[r.d.id].unit);
       });
     });
     const allIngIds=[...new Set(sortedDates.flatMap(dt=>Object.keys(byDate[dt]).map(Number)))];
