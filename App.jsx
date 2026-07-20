@@ -2827,17 +2827,17 @@ function RepCost({ctx}){
 function PoojaItemsPage({ctx}){
   const {poojaItems,setPoojaItems,lang}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
-  const [form,setForm]=useState({name:"",nameTamil:"",unit:"nos",normCost:""});
+  const [form,setForm]=useState({name:"",nameTamil:"",unit:"nos",qty:""});
   const [editId,setEditId]=useState(null);
   const [ef,setEf]=useState({});
 
   const add=()=>{
     if(!form.name.trim())return;
-    setPoojaItems(p=>[...p,{id:Date.now(),name:form.name.trim(),nameTamil:form.nameTamil.trim(),unit:form.unit,normCost:+form.normCost||0}]);
-    setForm({name:"",nameTamil:"",unit:"nos",normCost:""});
+    setPoojaItems(p=>[...p,{id:Date.now(),name:form.name.trim(),nameTamil:form.nameTamil.trim(),unit:form.unit,qty:+form.qty||1}]);
+    setForm({name:"",nameTamil:"",unit:"nos",qty:""});
   };
   const saveEdit=()=>{
-    setPoojaItems(p=>p.map(x=>x.id===editId?{...x,...ef,normCost:+ef.normCost||0}:x));
+    setPoojaItems(p=>p.map(x=>x.id===editId?{...x,...ef,qty:+ef.qty||1}:x));
     setEditId(null);
   };
   const del=(id)=>setPoojaItems(p=>p.filter(x=>x.id!==id));
@@ -2862,8 +2862,8 @@ function PoojaItemsPage({ctx}){
               {UNITS.map(u=><option key={u}>{u}</option>)}
             </select>
           </div>
-          <div><label style={css.lbl}>{t("Cost/unit ₹","செலவு/அலகு")}</label>
-            <input style={css.inp} type="number" value={form.normCost} onChange={e=>setForm({...form,normCost:e.target.value})}/>
+          <div><label style={css.lbl}>{t("Qty per Dispatch","அனுப்பும் அளவு")}</label>
+            <input style={css.inp} type="number" value={form.qty} placeholder="e.g. 5" onChange={e=>setForm({...form,qty:e.target.value})}/>
           </div>
         </div>
         <button style={css.btn()} onClick={add}>+ {t("Add Item","சேர்")}</button>
@@ -2876,7 +2876,7 @@ function PoojaItemsPage({ctx}){
             <th style={css.th}>{t("Item","பொருள்")}</th>
             <th style={css.th}>{t("Tamil","தமிழ்")}</th>
             <th style={css.th}>{t("Unit","அலகு")}</th>
-            <th style={css.th}>{t("Cost","செலவு")}</th>
+            <th style={{...css.th,textAlign:"right"}}>{t("Qty / Dispatch","அனுப்பும் அளவு")}</th>
             <th style={css.th}></th>
           </tr></thead>
           <tbody>
@@ -2895,9 +2895,9 @@ function PoojaItemsPage({ctx}){
                   {editId===item.id?<select style={css.sel} value={ef.unit||item.unit} onChange={e=>setEf({...ef,unit:e.target.value})}>{UNITS.map(u=><option key={u}>{u}</option>)}</select>
                     :<span style={css.badge(P.muted)}>{item.unit}</span>}
                 </td>
-                <td style={css.td}>
-                  {editId===item.id?<input style={css.inp} type="number" value={ef.normCost||""} onChange={e=>setEf({...ef,normCost:e.target.value})}/>
-                    :<span style={{color:P.success}}>{item.normCost?`₹${item.normCost}/${item.unit}`:"—"}</span>}
+                <td style={{...css.td,textAlign:"right"}}>
+                  {editId===item.id?<input style={{...css.inp,width:80}} type="number" value={ef.qty||""} onChange={e=>setEf({...ef,qty:e.target.value})}/>
+                    :<strong style={{color:P.saffron}}>{item.qty||1} {item.unit}</strong>}
                 </td>
                 <td style={css.td}>
                   <div style={{display:"flex",gap:4}}>
