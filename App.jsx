@@ -831,6 +831,12 @@ function RecsPage({ctx}){
                 <td style={css.td}>
                   <div style={{display:"flex",gap:4}}>
                     <button style={css.btn("ghost",true)} title="Edit" onClick={()=>setModal({type:"recipe",rec:r})}>✏️</button>
+                    <button style={css.btn("ghost",true)} title="Clone & Edit" onClick={()=>{
+                      const clone={...r,id:Date.now(),name:r.name+" (Copy)",nameTamil:r.nameTamil?(r.nameTamil+" (நகல்)"):"",
+                        ingredients:[...(r.ingredients||[])],subLinks:[...(r.subLinks||[])],prepSteps:[...(r.prepSteps||[])]};
+                      setRecipes(p=>[...p,clone]);
+                      setTimeout(()=>setModal({type:"recipe",rec:clone}),50);
+                    }}>⧉</button>
                     <button style={css.btn("danger",true)} title="Delete" onClick={()=>setRecipes(p=>p.filter(x=>x.id!==r.id))}>🗑</button>
                   </div>
                 </td>
