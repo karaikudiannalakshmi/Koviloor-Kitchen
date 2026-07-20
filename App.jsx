@@ -302,9 +302,11 @@ const INV0={
 
 // ── Expand a recipe's raw ingredients recursively via subLinks ────────────────
 // mainMult = how many times the base recipe is being made
-function expandRecipeIngs(rec, mainMult, recipes, ingredients, expandSubs=true) {
-  // expandSubs=false: sub-recipes shown as single line items (dish-wise report)
-  // expandSubs=true:  sub-recipes expanded into raw ingredients (shopping list, cost)
+function expandRecipeIngs(rec, mainMult, recipes, ingredients, expandSubs=true, _visited=new Set()) {
+  // Guard against circular sub-recipe references
+  if (_visited.has(rec.id)) return [];
+  const visited = new Set(_visited); visited.add(rec.id);
+
   const result = [];
 
   // 1. Always show direct ingredients
@@ -328,7 +330,7 @@ function expandRecipeIngs(rec, mainMult, recipes, ingredients, expandSubs=true) 
     } else {
       // Fully expand sub-recipe into raw ingredients
       const subMult = scaledQty / (sub.yield || 1);
-      expandRecipeIngs(sub, subMult, recipes, ingredients, true).forEach(si => result.push(si));
+      expandRecipeIngs(sub, subMult, recipes, ingredients, true, visited).forEach(si => result.push(si));
     }
   });
   return result;
@@ -1774,6 +1776,7 @@ function RepDish({ctx}){
   const t=(en,ta)=>rLang==="en"?en:ta;
   const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
   const [dt,setDt]=useState(TODAY);
+  const [activeSess,setActiveSess]=useState("All");
 
   const entries=orders.filter(o=>!o.isTemplate&&o.date===dt).flatMap(o=>o.entries.map(e=>({...e,_order:o})));
 
@@ -1786,6 +1789,9 @@ function RepDish({ctx}){
     return n(a.d).trim().localeCompare(n(b.d).trim());
   });
 
+  // Name→recipe lookup for sub-recipe detection
+  const recByNameLC=new Map(recipes.map(r=>[r.name.toLowerCase().trim(),r]));
+
   const sessData=SESSIONS.map(sess=>{
     const sessEntries=entries.filter(e=>e.session===sess);
     const byRec={};
@@ -1796,18 +1802,35 @@ function RepDish({ctx}){
       byRec[e.recId].totalQty+=e.qty;
     });
     const recs=Object.values(byRec).map(item=>{
-      const ings=sortIngs(mergeIngs(expandRecipeIngs(item.rec,item.totalMult,recipes,ingredients,false)));
-      const subSections=ings.filter(r=>r.isSubRecipe).map(r=>{
-        const subRec=recipes.find(x=>x.name===r.d.name);
-        return{d:r.d,qty:r.qty,unit:r.unit,
-          ings:subRec?sortIngs(mergeIngs(expandRecipeIngs(subRec,r.qty/(subRec.yield||1),recipes,ingredients,false))):[]};
+      const rawIngs=sortIngs(mergeIngs(expandRecipeIngs(item.rec,item.totalMult,recipes,ingredients,false)));
+      // Detect sub-recipes: either flagged isSubRecipe OR ingredient name matches a recipe
+      const seen=new Set();
+      const subSections=[];
+      rawIngs.forEach(r=>{
+        const matchRec=r.isSubRecipe
+          ?recipes.find(x=>x.name===r.d.name)
+          :recByNameLC.get(r.d.name.toLowerCase().trim());
+        if(matchRec&&!seen.has(matchRec.id)){
+          seen.add(matchRec.id);
+          subSections.push({
+            d:{...r.d,name:matchRec.name,nameTamil:matchRec.nameTamil||r.d.nameTamil,isSubRecipe:true},
+            qty:r.qty,unit:r.unit,
+            ings:sortIngs(mergeIngs(expandRecipeIngs(matchRec,r.qty/(matchRec.yield||1),recipes,ingredients,false)))
+          });
+        }
+      });
+      // Mark ingredient rows that are sub-recipes
+      const ings=rawIngs.map(r=>{
+        const isSub=r.isSubRecipe||recByNameLC.has(r.d.name.toLowerCase().trim());
+        return isSub?{...r,isSubRecipe:true,d:{...r.d,isSubRecipe:true}}:r;
       });
       return{...item,ings,subSections};
     });
     return{session:sess,recs};
   }).filter(sd=>sd.recs.length>0);
 
-  const hasData=sessData.length>0;
+  const visibleSess=activeSess==="All"?sessData:sessData.filter(sd=>sd.session===activeSess);
+  const hasData=visibleSess.length>0;
 
   // Print font includes Noto Sans Tamil for Tamil rendering
   const PRINT_FONTS='<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Tamil:wght@400;600;700&family=Noto+Sans:wght@400;600;700&display=swap"/>';
@@ -1891,8 +1914,20 @@ function RepDish({ctx}){
         <div><label style={css.lbl}>{t('Date','தேதி')}</label><input type="date" style={{...css.inp,width:160}} value={dt} onChange={e=>setDt(e.target.value)}/></div>
         {entries.length>0&&<button style={css.btn('info',true)} onClick={()=>setModal({type:'postIssues',date:dt})}>📦 {t('Post Issues','சரக்கு போடு')}</button>}
       </ReportBar>
+      {/* Session filter tabs */}
+      <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}}>
+        {['All',...SESSIONS].map(s=>{
+          const has=s==='All'?sessData.length>0:sessData.some(sd=>sd.session===s);
+          if(!has&&s!=='All')return null;
+          return(<button key={s} style={{...css.btn(activeSess===s?'primary':'ghost',true),
+            borderColor:s!=='All'?(SCOLOR[s]||P.muted):'#DCC88A',
+            color:activeSess===s?'white':(s!=='All'?SCOLOR[s]:P.deepBrown),
+            background:activeSess===s?(SCOLOR[s]||P.saffron):'transparent',
+          }} onClick={()=>setActiveSess(s)}>{s==='All'?t('All Sessions','அனைத்து'):s}</button>);
+        })}
+      </div>
       {!hasData&&<div style={{color:P.muted,textAlign:'center',padding:24}}>{t('No orders for this date.','இந்த தேதியில் ஆர்டர் இல்லை.')}</div>}
-      {sessData.map(sd=>(
+      {visibleSess.map(sd=>(
         <div key={sd.session} style={{...css.card,marginBottom:16,border:'1px solid #333'}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14,flexWrap:'wrap',gap:8}}>
             <div style={{display:'flex',alignItems:'center',gap:10}}>
