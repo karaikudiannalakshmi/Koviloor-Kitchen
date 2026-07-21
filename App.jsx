@@ -2908,7 +2908,7 @@ function PoojaItemsPage({ctx}){
 function PoojaTemplesPage({ctx}){
   const {poojaTemples,setPoojaTemples,poojaItems,lang}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
-  const [form,setForm]=useState({name:"",location:"",contact:""});
+  const [form,setForm]=useState({name:"",nameTamil:"",location:"",contact:""});
   const [openId,setOpenId]=useState(null);
   const [selDay,setSelDay]=useState("monday");
 
@@ -2922,9 +2922,9 @@ function PoojaTemplesPage({ctx}){
 
   const addTemple=()=>{
     if(!form.name.trim())return;
-    setPoojaTemples(p=>[...p,{id:Date.now(),name:form.name.trim(),
+    setPoojaTemples(p=>[...p,{id:Date.now(),name:form.name.trim(),nameTamil:form.nameTamil.trim(),
       location:form.location.trim(),contact:form.contact.trim(),schedule:{}}]);
-    setForm({name:"",location:"",contact:""});
+    setForm({name:"",nameTamil:"",location:"",contact:""});
   };
   const delTemple=(id)=>{if(confirm(t("Delete this temple?","நீக்கவா?")))setPoojaTemples(p=>p.filter(x=>x.id!==id));};
 
@@ -2951,9 +2951,12 @@ function PoojaTemplesPage({ctx}){
         <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,color:P.deepBrown,marginBottom:12}}>
           🛕 {t("Temples & Weekly Schedule","கோவில்கள் & வாராந்திர அட்டவணை")}
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10,marginBottom:10}}>
           <div><label style={css.lbl}>{t("Temple Name","கோவில் பெயர்")}</label>
             <input style={css.inp} value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Sri Murugan Temple"/>
+          </div>
+          <div><label style={css.lbl}>{t("Temple Name (Tamil)","கோவில் பெயர் (தமிழ்)")}</label>
+            <input style={{...css.inp,fontFamily:"Noto Sans Tamil"}} value={form.nameTamil} onChange={e=>setForm({...form,nameTamil:e.target.value})} placeholder="ஸ்ரீ முருகன் கோவில்"/>
           </div>
           <div><label style={css.lbl}>{t("Location","இடம்")}</label>
             <input style={css.inp} value={form.location} onChange={e=>setForm({...form,location:e.target.value})} placeholder="Chennai"/>
@@ -3135,14 +3138,15 @@ function PoojaDispatchPage({ctx}){
   };
 
   const printReport=()=>{
-    const dayLabel=dayKey.charAt(0).toUpperCase()+dayKey.slice(1);
+    const DAY_TA={sunday:"ஞாயிறு",monday:"திங்கள்",tuesday:"செவ்வாய்",wednesday:"புதன்",thursday:"வியாழன்",friday:"வெள்ளி",saturday:"சனி"};
+    const dayLabel=lang==="en"?dayKey.charAt(0).toUpperCase()+dayKey.slice(1):DAY_TA[dayKey];
     const temples=activeTemples;
     if(!temples.length){alert("No items scheduled for this day.");return;}
 
     const SLOT_LIST=[
-      {key:"morning",label:"Morning",icon:"🌅"},
-      {key:"afternoon",label:"Afternoon",icon:"☀️"},
-      {key:"evening",label:"Evening",icon:"🌙"},
+      {key:"morning",label:t("Morning","காலை"),icon:"🌅"},
+      {key:"afternoon",label:t("Afternoon","மதியம்"),icon:"☀️"},
+      {key:"evening",label:t("Evening","மாலை"),icon:"🌙"},
     ];
 
     // Build HTML for each slot section
@@ -3153,21 +3157,21 @@ function PoojaDispatchPage({ctx}){
       );
       if(!activeItems.length)return "";
 
-      const thCols=temples.map(tm=>`<th style='padding:6px 10px;border:1px solid #000;background:#222;color:white;font-size:12px;white-space:nowrap'>${tm.name}</th>`).join("");
+      const thCols=temples.map(tm=>`<th style='padding:6px 10px;border:1px solid #000;background:#222;color:white;font-size:12px;white-space:nowrap'>${tm.nameTamil||tm.name}</th>`).join("");
       const rows=activeItems.map((pi,i)=>{
         const tds=temples.map(tm=>{
           const qty=getQty(tm.id,pi.id,sl.key);
           const done=isDispatched(tm.id,pi.id,sl.key);
           return `<td style='padding:5px 10px;border:1px solid #CCC;text-align:center;font-size:12px;background:${done?"#E8F8E8":"white"}'>${qty?`<strong>${qty} ${pi.unit}</strong>${done?" ✓":""}`:"—"}</td>`;
         }).join("");
-        return `<tr style='background:${i%2===0?"white":"#F5F5F5"}'><td style='padding:5px 10px;border:1px solid #CCC;font-size:12px;font-weight:600'>${pi.name}</td>${tds}</tr>`;
+        return `<tr style='background:${i%2===0?"white":"#F5F5F5"}'><td style='padding:5px 10px;border:1px solid #CCC;font-size:12px;font-weight:600'>${pi.nameTamil||pi.name}</td>${tds}</tr>`;
       }).join("");
 
       return `<div style='margin-bottom:24px;page-break-inside:avoid'>
         <div style='font-size:14px;font-weight:700;border-bottom:2px solid #000;padding-bottom:4px;margin-bottom:8px'>${sl.icon} ${sl.label}</div>
         <table style='width:100%;border-collapse:collapse'>
           <thead><tr>
-            <th style='padding:6px 10px;border:1px solid #000;background:#222;color:white;font-size:12px;text-align:left'>Item</th>
+            <th style='padding:6px 10px;border:1px solid #000;background:#222;color:white;font-size:12px;text-align:left'>${t("Item","பொருள்")}</th>
             ${thCols}
           </tr></thead>
           <tbody>${rows}</tbody>
@@ -3176,12 +3180,12 @@ function PoojaDispatchPage({ctx}){
     }).join("");
 
     printHTML(
-      "Pooja Dispatch — "+dayLabel+" "+dt,
+      t("Pooja Dispatch — ","பூஜை பொருள் அனுப்புதல் — ")+dayLabel+" "+dt,
       `<div style='margin-bottom:16px'>
-        <div style='font-size:11px;color:#555'>${t("Date","தேதி")}: ${dt} | ${dayLabel} | ${temples.length} temple(s)</div>
+        <div style='font-size:11px;color:#555'>${t("Date","தேதி")}: ${dt} | ${dayLabel} | ${temples.length} ${t("temple(s)","கோவில்கள்")}</div>
       </div>
       ${slotBlocks}
-      <div style='margin-top:16px;font-size:11px;color:#555;border-top:1px solid #CCC;padding-top:6px'>✓ = Dispatched &nbsp;&nbsp; — = Not scheduled</div>`
+      <div style='margin-top:16px;font-size:11px;color:#555;border-top:1px solid #CCC;padding-top:6px'>${t("✓ = Dispatched — = Not scheduled","✓ = அனுப்பப்பட்டது — = அட்டவணை இல்லை")}</div>`
     );
   };
 
