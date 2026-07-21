@@ -3134,6 +3134,57 @@ function PoojaDispatchPage({ctx}){
     exportXlsxSheets("pooja_dispatch_"+dt+".xlsx",[{name:"Dispatch",data:rows}]);
   };
 
+  const printReport=()=>{
+    const dayLabel=dayKey.charAt(0).toUpperCase()+dayKey.slice(1);
+    const temples=activeTemples;
+    if(!temples.length){alert("No items scheduled for this day.");return;}
+
+    const SLOT_LIST=[
+      {key:"morning",label:"Morning",icon:"🌅"},
+      {key:"afternoon",label:"Afternoon",icon:"☀️"},
+      {key:"evening",label:"Evening",icon:"🌙"},
+    ];
+
+    // Build HTML for each slot section
+    const slotBlocks=SLOT_LIST.map(sl=>{
+      // Find items that have qty in this slot for at least one temple
+      const activeItems=poojaItems.filter(pi=>
+        temples.some(tm=>getQty(tm.id,pi.id,sl.key))
+      );
+      if(!activeItems.length)return "";
+
+      const thCols=temples.map(tm=>`<th style='padding:6px 10px;border:1px solid #000;background:#222;color:white;font-size:12px;white-space:nowrap'>${tm.name}</th>`).join("");
+      const rows=activeItems.map((pi,i)=>{
+        const tds=temples.map(tm=>{
+          const qty=getQty(tm.id,pi.id,sl.key);
+          const done=isDispatched(tm.id,pi.id,sl.key);
+          return `<td style='padding:5px 10px;border:1px solid #CCC;text-align:center;font-size:12px;background:${done?"#E8F8E8":"white"}'>${qty?`<strong>${qty} ${pi.unit}</strong>${done?" ✓":""}`:"—"}</td>`;
+        }).join("");
+        return `<tr style='background:${i%2===0?"white":"#F5F5F5"}'><td style='padding:5px 10px;border:1px solid #CCC;font-size:12px;font-weight:600'>${pi.name}</td>${tds}</tr>`;
+      }).join("");
+
+      return `<div style='margin-bottom:24px;page-break-inside:avoid'>
+        <div style='font-size:14px;font-weight:700;border-bottom:2px solid #000;padding-bottom:4px;margin-bottom:8px'>${sl.icon} ${sl.label}</div>
+        <table style='width:100%;border-collapse:collapse'>
+          <thead><tr>
+            <th style='padding:6px 10px;border:1px solid #000;background:#222;color:white;font-size:12px;text-align:left'>Item</th>
+            ${thCols}
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+    }).join("");
+
+    printHTML(
+      "Pooja Dispatch — "+dayLabel+" "+dt,
+      `<div style='margin-bottom:16px'>
+        <div style='font-size:11px;color:#555'>${t("Date","தேதி")}: ${dt} | ${dayLabel} | ${temples.length} temple(s)</div>
+      </div>
+      ${slotBlocks}
+      <div style='margin-top:16px;font-size:11px;color:#555;border-top:1px solid #CCC;padding-top:6px'>✓ = Dispatched &nbsp;&nbsp; — = Not scheduled</div>`
+    );
+  };
+
   return(
     <div>
       <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"flex-end"}}>
@@ -3150,6 +3201,7 @@ function PoojaDispatchPage({ctx}){
           <button style={css.btn(view==="dispatch"?"primary":"ghost",true)} onClick={()=>setView("dispatch")}>📦 {t("Dispatch","அனுப்புதல்")}</button>
           <button style={css.btn(view==="history"?"primary":"ghost",true)} onClick={()=>setView("history")}>📋 {t("History","வரலாறு")}</button>
           <button style={css.btn("ghost",true)} onClick={exportSheet}>📥 Excel</button>
+          <button style={css.btn("primary",true)} onClick={printReport}>🖨 {t("Print Report","அறிக்கை அச்சு")}</button>
         </div>
       </div>
 
