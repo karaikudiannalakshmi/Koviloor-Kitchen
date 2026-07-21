@@ -4,9 +4,9 @@ import { doc, setDoc, onSnapshot } from "firebase/firestore";
 import { ING0, REC0, LOC0, RTYPE_SEED } from "./seeds.js";
 
 const COL          = "koviloor";
-const KITCHEN_DOC  = "kitchen";   // orders, inventory, locations, recipeTypes
-const CATALOG_DOC  = "catalog";   // recipes, ingredients
-const POOJA_DOC    = "pooja";     // poojaItems, poojaTemples, poojaDels — own doc
+const KITCHEN_DOC  = "kitchen";
+const CATALOG_DOC  = "catalog";
+const POOJA_DOC    = "pooja";
 const SAVE_DELAY   = 2000;
 
 function clean(v) {
@@ -34,20 +34,23 @@ export function useKitchenData() {
   const [poojaTemples, _setPoojaTemples] = useState([]);
   const [poojaDels,    _setPoojaDels]    = useState([]);
 
-  const cur = useRef({
-    orders: [], inventory: { purchases: [], issues: [] },
-    locations: [], recipeTypes: [],
-    ingredients: [], recipes: [],
-    poojaItems: [], poojaTemples: [], poojaDels: [],
-  });
+  // Stable refs — always current, never stale
+  const kit = useRef({ orders:[], inventory:{purchases:[],issues:[]}, locations:[], recipeTypes:[] });
+  const cat = useRef({ recipes:[], ingredients:[] });
+  const poo = useRef({ poojaItems:[], poojaTemples:[], poojaDels:[] });
 
   const saveTimer  = useRef(null);
-  const savingKit  = useRef(false);
-  const savingCat  = useRef(false);
-  const savingPoo  = useRef(false);
+  const kitSaving  = useRef(false);
+  const catSaving  = useRef(false);
+  const pooSaving  = useRef(false);
+  const kitDirty   = useRef(false);
+  const catDirty   = useRef(false);
+  const pooDirty   = useRef(false);
   const kitOK      = useRef(false);
   const catOK      = useRef(false);
   const pooOK      = useRef(false);
+
+  const [saveStatus2, _ignore] = useState(null); // unused, kept for compat
 
   const checkLoaded = () => {
     if (kitOK.current && catOK.current && pooOK.current) setLoaded(true);
@@ -60,18 +63,18 @@ export function useKitchenData() {
       const d = snap.exists() ? snap.data() : null;
       const data = d || { orders:[], inventory:{purchases:[],issues:[]}, locations:LOC0, recipeTypes:RTYPE_SEED };
       if (!d) setDoc(ref, clean(data));
-      if (!savingKit.current) {
-        cur.current.orders      = data.orders      ?? [];
-        cur.current.inventory   = data.inventory   ?? { purchases:[], issues:[] };
-        cur.current.locations   = data.locations   ?? LOC0;
-        cur.current.recipeTypes = data.recipeTypes ?? RTYPE_SEED;
+      if (!kitSaving.current) {
+        kit.current.orders      = data.orders      ?? [];
+        kit.current.inventory   = data.inventory   ?? { purchases:[], issues:[] };
+        kit.current.locations   = data.locations   ?? LOC0;
+        kit.current.recipeTypes = data.recipeTypes ?? RTYPE_SEED;
       }
       _setOrders(data.orders       ?? []);
       _setInventory(data.inventory  ?? { purchases:[], issues:[] });
       _setLocations(data.locations  ?? LOC0);
       _setRecipeTypes(data.recipeTypes ?? RTYPE_SEED);
       kitOK.current = true; checkLoaded();
-    }, err => { console.error("Kitchen:", err); setLoaded(true); });
+    }, err => { console.error("Kitchen:", err); kitOK.current=true; checkLoaded(); });
   }, []);
 
   // ── Catalog ────────────────────────────────────────────────────────────────
@@ -81,81 +84,68 @@ export function useKitchenData() {
       const d = snap.exists() ? snap.data() : null;
       const data = d || { recipes:REC0, ingredients:ING0 };
       if (!d) setDoc(ref, clean(data));
-      if (!savingCat.current) {
-        cur.current.recipes     = data.recipes     ?? REC0;
-        cur.current.ingredients = data.ingredients ?? ING0;
+      if (!catSaving.current) {
+        cat.current.recipes     = data.recipes     ?? REC0;
+        cat.current.ingredients = data.ingredients ?? ING0;
       }
       _setRecipes(data.recipes     ?? REC0);
       _setIngredients(data.ingredients ?? ING0);
       catOK.current = true; checkLoaded();
-    }, err => { console.error("Catalog:", err); setLoaded(true); });
+    }, err => { console.error("Catalog:", err); catOK.current=true; checkLoaded(); });
   }, []);
 
-  // ── Pooja — dedicated document, completely isolated from kitchen saves ──────
+  // ── Pooja ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     const ref = doc(db, COL, POOJA_DOC);
     return onSnapshot(ref, snap => {
       const d = snap.exists() ? snap.data() : null;
       const data = d || { poojaItems:[], poojaTemples:[], poojaDels:[] };
       if (!d) setDoc(ref, clean(data));
-      if (!savingPoo.current) {
-        cur.current.poojaItems   = data.poojaItems   ?? [];
-        cur.current.poojaTemples = data.poojaTemples ?? [];
-        cur.current.poojaDels    = data.poojaDels    ?? [];
+      if (!pooSaving.current) {
+        poo.current.poojaItems   = data.poojaItems   ?? [];
+        poo.current.poojaTemples = data.poojaTemples ?? [];
+        poo.current.poojaDels    = data.poojaDels    ?? [];
       }
       _setPoojaItems(data.poojaItems   ?? []);
       _setPoojaTemples(data.poojaTemples ?? []);
       _setPoojaDels(data.poojaDels    ?? []);
       pooOK.current = true; checkLoaded();
-    }, err => { console.error("Pooja:", err); setLoaded(true); });
+    }, err => { console.error("Pooja:", err); pooOK.current=true; checkLoaded(); });
   }, []);
 
-  // ── Save helpers ───────────────────────────────────────────────────────────
-  const saveKitchen = () => {
-    savingKit.current = true;
-    return setDoc(doc(db, COL, KITCHEN_DOC), clean({
-      orders:      cur.current.orders,
-      inventory:   cur.current.inventory,
-      locations:   cur.current.locations,
-      recipeTypes: cur.current.recipeTypes,
-    })).finally(() => { savingKit.current = false; });
-  };
-
-  const saveCatalog = () => {
-    savingCat.current = true;
-    return setDoc(doc(db, COL, CATALOG_DOC), clean({
-      recipes:     cur.current.recipes,
-      ingredients: cur.current.ingredients,
-    })).finally(() => { savingCat.current = false; });
-  };
-
-  const savePooja = () => {
-    savingPoo.current = true;
-    return setDoc(doc(db, COL, POOJA_DOC), clean({
-      poojaItems:   cur.current.poojaItems,
-      poojaTemples: cur.current.poojaTemples,
-      poojaDels:    cur.current.poojaDels,
-    })).finally(() => { savingPoo.current = false; });
-  };
-
-  // Track which docs have pending changes
-  const pendingKit = useRef(false);
-  const pendingCat = useRef(false);
-  const pendingPoo = useRef(false);
-  const saveTimer2 = useRef(null);
-
-  const scheduleSave = useCallback((kit, cat, poo) => {
-    if (kit) pendingKit.current = true;
-    if (cat) pendingCat.current = true;
-    if (poo) pendingPoo.current = true;
+  // ── Debounced save ─────────────────────────────────────────────────────────
+  const triggerSave = useCallback(() => {
     setSaveStatus("pending");
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       setSaveStatus("saving");
       const saves = [];
-      if (pendingKit.current) { pendingKit.current = false; saves.push(saveKitchen()); }
-      if (pendingCat.current) { pendingCat.current = false; saves.push(saveCatalog()); }
-      if (pendingPoo.current) { pendingPoo.current = false; saves.push(savePooja()); }
+
+      if (kitDirty.current) {
+        kitDirty.current = false;
+        kitSaving.current = true;
+        saves.push(
+          setDoc(doc(db, COL, KITCHEN_DOC), clean(kit.current))
+            .finally(() => { kitSaving.current = false; })
+        );
+      }
+      if (catDirty.current) {
+        catDirty.current = false;
+        catSaving.current = true;
+        saves.push(
+          setDoc(doc(db, COL, CATALOG_DOC), clean(cat.current))
+            .finally(() => { catSaving.current = false; })
+        );
+      }
+      if (pooDirty.current) {
+        pooDirty.current = false;
+        pooSaving.current = true;
+        saves.push(
+          setDoc(doc(db, COL, POOJA_DOC), clean(poo.current))
+            .finally(() => { pooSaving.current = false; })
+        );
+      }
+
       try {
         await Promise.all(saves);
         setSaveStatus("saved");
@@ -169,38 +159,64 @@ export function useKitchenData() {
   const forceSave = useCallback(async () => {
     clearTimeout(saveTimer.current);
     setSaveStatus("saving");
+    kitSaving.current = catSaving.current = pooSaving.current = true;
     try {
-      await Promise.all([saveKitchen(), saveCatalog(), savePooja()]);
+      await Promise.all([
+        setDoc(doc(db, COL, KITCHEN_DOC), clean(kit.current)),
+        setDoc(doc(db, COL, CATALOG_DOC), clean(cat.current)),
+        setDoc(doc(db, COL, POOJA_DOC),   clean(poo.current)),
+      ]);
       setSaveStatus("saved");
     } catch(e) {
       console.error("Force save failed:", e);
       setSaveStatus("error");
+    } finally {
+      kitSaving.current = catSaving.current = pooSaving.current = false;
+      kitDirty.current = catDirty.current = pooDirty.current = false;
     }
   }, []);
 
-  const makeSet = (field, rawSetter, docGroup) => (valOrFn) => {
-    rawSetter(prev => {
+  // ── Wrapped setters ────────────────────────────────────────────────────────
+  const makeKitSet = (field, setter) => (valOrFn) => {
+    setter(prev => {
       const next = typeof valOrFn === "function" ? valOrFn(prev) : valOrFn;
-      cur.current[field] = next;
+      kit.current[field] = next;
       return next;
     });
-    scheduleSave(
-      docGroup === "kitchen",
-      docGroup === "catalog",
-      docGroup === "pooja"
-    );
+    kitDirty.current = true;
+    triggerSave();
+  };
+
+  const makeCatSet = (field, setter) => (valOrFn) => {
+    setter(prev => {
+      const next = typeof valOrFn === "function" ? valOrFn(prev) : valOrFn;
+      cat.current[field] = next;
+      return next;
+    });
+    catDirty.current = true;
+    triggerSave();
+  };
+
+  const makePooSet = (field, setter) => (valOrFn) => {
+    setter(prev => {
+      const next = typeof valOrFn === "function" ? valOrFn(prev) : valOrFn;
+      poo.current[field] = next;
+      return next;
+    });
+    pooDirty.current = true;
+    triggerSave();
   };
 
   return {
     loaded, saveStatus, forceSave,
-    ingredients,  setIngredients:  makeSet("ingredients",  _setIngredients,  "catalog"),
-    recipes,      setRecipes:      makeSet("recipes",      _setRecipes,      "catalog"),
-    orders,       setOrders:       makeSet("orders",       _setOrders,       "kitchen"),
-    inventory,    setInventory:    makeSet("inventory",    _setInventory,    "kitchen"),
-    locations,    setLocations:    makeSet("locations",    _setLocations,    "kitchen"),
-    recipeTypes,  setRecipeTypes:  makeSet("recipeTypes",  _setRecipeTypes,  "kitchen"),
-    poojaItems,   setPoojaItems:   makeSet("poojaItems",   _setPoojaItems,   "pooja"),
-    poojaTemples, setPoojaTemples: makeSet("poojaTemples", _setPoojaTemples, "pooja"),
-    poojaDels,    setPoojaDels:    makeSet("poojaDels",    _setPoojaDels,    "pooja"),
+    ingredients,  setIngredients:  makeCatSet("ingredients",  _setIngredients),
+    recipes,      setRecipes:      makeCatSet("recipes",      _setRecipes),
+    orders,       setOrders:       makeKitSet("orders",       _setOrders),
+    inventory,    setInventory:    makeKitSet("inventory",    _setInventory),
+    locations,    setLocations:    makeKitSet("locations",    _setLocations),
+    recipeTypes,  setRecipeTypes:  makeKitSet("recipeTypes",  _setRecipeTypes),
+    poojaItems,   setPoojaItems:   makePooSet("poojaItems",   _setPoojaItems),
+    poojaTemples, setPoojaTemples: makePooSet("poojaTemples", _setPoojaTemples),
+    poojaDels,    setPoojaDels:    makePooSet("poojaDels",    _setPoojaDels),
   };
 }
