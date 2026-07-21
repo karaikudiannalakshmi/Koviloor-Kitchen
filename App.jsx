@@ -3084,13 +3084,12 @@ function PoojaDispatchPage({ctx}){
 
   const dayKey=getDayOfWeek(dt);
 
-  // Get scheduled qty for a slot (from weekly schedule, overridden by manual entry)
+  // Get scheduled qty — reads from temple.schedule[itemId][day][slot] (new structure)
   const getQty=(templeId,itemId,slot)=>{
     const oKey=`${templeId}_${itemId}_${slot}`;
     if(overrides[oKey]!==undefined)return overrides[oKey];
     const temple=poojaTemples.find(t=>t.id===templeId);
-    const it=temple?.items?.find(x=>x.itemId===itemId);
-    return (it?.schedule||{})[dayKey]?.[slot]||"";
+    return (temple?.schedule?.[itemId]?.[dayKey]?.[slot])||"";
   };
 
   const setQty=(templeId,itemId,slot,val)=>{
@@ -3114,10 +3113,9 @@ function PoojaDispatchPage({ctx}){
   };
 
   const activeTemples=poojaTemples.filter(tm=>
-    poojaItems.some(pi=>{
-      const it=tm.items?.find(x=>x.itemId===pi.id);
-      return SLOTS.some(s=>getQty(tm.id,pi.id,s.key));
-    })
+    poojaItems.some(pi=>
+      SLOTS.some(s=>(tm.schedule?.[pi.id]?.[dayKey]?.[s.key])||overrides[`${tm.id}_${pi.id}_${s.key}`])
+    )
   );
 
   const exportSheet=()=>{
@@ -3242,19 +3240,18 @@ function PoojaPurchasePage({ctx}){
   const [selDay,setSelDay]=useState("monday");
   const DAY_LABEL={monday:"Mon",tuesday:"Tue",wednesday:"Wed",thursday:"Thu",friday:"Fri",saturday:"Sat",sunday:"Sun"};
 
-  // Aggregate for selected day across all temples and slots
+  // Aggregate for selected day — uses temple.schedule[itemId][day][slot] (new structure)
   const totals={};
   poojaTemples.forEach(tm=>{
-    (tm.items||[]).forEach(it=>{
-      const pi=poojaItems.find(x=>x.id===it.itemId); if(!pi)return;
-      const day=(it.schedule||{})[selDay]||{};
-      const m=+day.morning||0,a=+day.afternoon||0,e=+day.evening||0;
+    poojaItems.forEach(pi=>{
+      const dayData=(tm.schedule?.[pi.id]?.[selDay])||{};
+      const m=+dayData.morning||0,a=+dayData.afternoon||0,e=+dayData.evening||0;
       if(!m&&!a&&!e)return;
-      if(!totals[it.itemId])totals[it.itemId]={item:pi,morning:0,afternoon:0,evening:0,temples:[]};
-      totals[it.itemId].morning+=m;
-      totals[it.itemId].afternoon+=a;
-      totals[it.itemId].evening+=e;
-      totals[it.itemId].temples.push({name:tm.name,m,a,e});
+      if(!totals[pi.id])totals[pi.id]={item:pi,morning:0,afternoon:0,evening:0,temples:[]};
+      totals[pi.id].morning+=m;
+      totals[pi.id].afternoon+=a;
+      totals[pi.id].evening+=e;
+      totals[pi.id].temples.push({name:tm.name,m,a,e});
     });
   });
   const rows=Object.values(totals).sort((a,b)=>a.item.name.localeCompare(b.item.name));
