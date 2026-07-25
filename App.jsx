@@ -415,6 +415,8 @@ function App(){
       {id:"pooja_temples",en:"Temples & Lists",ta:"கோவில்கள்"},
       {id:"pooja_dispatch",en:"Dispatch",ta:"அனுப்புதல்"},
       {id:"pooja_purchase",en:"Purchase Summary",ta:"கொள்முதல்"},
+      {id:"pooja_weekly",en:"Weekly Issue List",ta:"வார அனுப்புதல் பட்டியல்"},
+      {id:"pooja_weekshop",en:"Weekly Shopping List",ta:"வார கொள்முதல் பட்டியல்"},
     ]},
     {id:"occasions",icon:"🕉️",en:"Temple Occasions",ta:"கோவில் சிறப்பு நாட்கள்",children:[
       {id:"occ_templates",en:"Templates",ta:"மாதிரிகள்"},
@@ -479,6 +481,8 @@ function App(){
           {page==="pooja_temples"&&<PoojaTemplesPage ctx={ctx}/>}
           {page==="pooja_dispatch"&&<PoojaDispatchPage ctx={ctx}/>}
           {page==="pooja_purchase"&&<PoojaPurchasePage ctx={ctx}/>}
+          {page==="pooja_weekly"&&<PoojaWeeklyIssuePage ctx={ctx}/>}
+          {page==="pooja_weekshop"&&<PoojaWeeklyShopPage ctx={ctx}/>}
           {page==="occ_templates"&&<OccTemplatesPage ctx={ctx}/>}
           {page==="occ_orders"&&<OccOrdersPage ctx={ctx}/>}
           {page==="occ_purchase"&&<OccPurchasePage ctx={ctx}/>}
@@ -3053,7 +3057,8 @@ function PoojaItemsPage({ctx}){
   const [form,setForm]=useState({name:"",nameTamil:"",unit:"nos"});
   const [editId,setEditId]=useState(null);
   const [ef,setEf]=useState({});
-  const UNITS=["nos","kg","g","L","packet","box","bundle","pair"];
+  const UNITS=["nos","kg","g","L","tsp","packet","box","bundle","pair"];
+  const fRef=useRef();
 
   const add=()=>{
     if(!form.name.trim())return;
@@ -3063,11 +3068,61 @@ function PoojaItemsPage({ctx}){
   const saveEdit=()=>{setPoojaItems(p=>p.map(x=>x.id===editId?{...x,...ef}:x));setEditId(null);};
   const del=(id)=>setPoojaItems(p=>p.filter(x=>x.id!==id));
 
+  const importXlsx=e=>{
+    const file=e.target.files[0]; if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const wb=XLSX.read(ev.target.result,{type:"binary"});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+      const valid=rows.filter(r=>(r.name+"").trim());
+      if(!valid.length){alert("No valid rows found. Make sure row 1 has headers: name, nameTamil, unit");return;}
+      let nextId=Date.now();
+      const imported=valid.map(r=>({
+        id:nextId++,
+        name:(r.name+"").trim(),
+        nameTamil:(r.nameTamil+"").trim(),
+        unit:((r.unit||"nos")+"").trim()||"nos",
+      }));
+      setPoojaItems(prev=>{
+        const map=new Map(prev.map(x=>[x.name.toLowerCase(),x]));
+        imported.forEach(r=>{
+          const key=r.name.toLowerCase();
+          if(map.has(key)){const ex=map.get(key);map.set(key,{...ex,...r,id:ex.id});}
+          else{map.set(key,r);}
+        });
+        return Array.from(map.values());
+      });
+      alert(imported.length+" items imported.");
+    };
+    reader.readAsBinaryString(file);
+    e.target.value="";
+  };
+
+  const exportItems=()=>{
+    const data=poojaItems.map(pi=>({name:pi.name,nameTamil:pi.nameTamil||"",unit:pi.unit||"nos"}));
+    const ws=XLSX.utils.json_to_sheet(data);
+    ws["!cols"]=[{wch:30},{wch:28},{wch:10}];
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Pooja Items");
+    XLSX.writeFile(wb,"pooja_items_export.xlsx");
+  };
+
   return(
     <div>
       <div style={css.card}>
-        <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,color:P.deepBrown,marginBottom:12}}>
-          🪔 {t("Pooja Items Master","பூஜை பொருட்கள்")}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,color:P.deepBrown}}>
+            🪔 {t("Pooja Items Master","பூஜை பொருட்கள்")}
+          </div>
+          <div style={{display:"flex",gap:6}}>
+            <button style={css.btn("ghost",true)} onClick={exportItems}>⬇️ {t("Export Excel","Excel ஏற்று")}</button>
+            <button style={css.btn("success",true)} onClick={()=>fRef.current.click()}>📤 {t("Import Excel","Excel இறக்கு")}</button>
+            <input ref={fRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importXlsx}/>
+          </div>
+        </div>
+        <div style={{fontSize:11,color:P.muted,marginBottom:10}}>
+          {t("Import expects column headers: name, nameTamil, unit. Existing items are matched by name and updated; new names are added.","தலைப்புகள்: name, nameTamil, unit. பெயர் பொருந்தினால் புதுப்பிக்கப்படும்.")}
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 120px",gap:10,marginBottom:10}}>
           <div><label style={css.lbl}>{t("Item Name","பொருள் பெயர்")}</label>
@@ -3589,6 +3644,173 @@ function PoojaPurchasePage({ctx}){
 // ════════════════════════════════════════════════════════════════════
 // TEMPLE OCCASIONS MODULE (Moolam/star, Ekadasi, Pradosham, Ashtami, Gurupooja...)
 // ════════════════════════════════════════════════════════════════════
+function PoojaWeeklyIssuePage({ctx}){
+  const {poojaTemples,poojaItems,lang:gLang}=ctx;
+  const [lang,setLang]=useState(gLang);
+  const t=(en,ta)=>lang==="en"?en:ta;
+  const n=(x)=>lang==="en"?x.name:(x.nameTamil||x.name);
+  const DAYS=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
+  const DAY_LABEL={monday:"Mon",tuesday:"Tue",wednesday:"Wed",thursday:"Thu",friday:"Fri",saturday:"Sat",sunday:"Sun"};
+  const DAY_LABEL_TA={monday:"திங்கள்",tuesday:"செவ்வாய்",wednesday:"புதன்",thursday:"வியாழன்",friday:"வெள்ளி",saturday:"சனி",sunday:"ஞாயிறு"};
+  const dayN=d=>lang==="en"?DAY_LABEL[d]:DAY_LABEL_TA[d];
+  const [templeF,setTempleF]=useState("all");
+
+  const temples=templeF==="all"?poojaTemples:poojaTemples.filter(tm=>tm.id===+templeF);
+
+  const dayTotal=(pi,d)=>{
+    let sum=0;
+    temples.forEach(tm=>{
+      const dd=tm.schedule?.[pi.id]?.[d]||{};
+      sum+=(+dd.morning||0)+(+dd.afternoon||0)+(+dd.evening||0);
+    });
+    return sum;
+  };
+
+  const rows=poojaItems.map(pi=>{
+    const byDay={};
+    DAYS.forEach(d=>{const s=dayTotal(pi,d); if(s>0)byDay[d]=s;});
+    return{item:pi,byDay,total:Object.values(byDay).reduce((s,v)=>s+v,0)};
+  }).filter(r=>r.total>0);
+
+  const hasData=rows.length>0;
+  const templeLabel=templeF==="all"?t("All Temples","அனைத்து கோவில்கள்"):(poojaTemples.find(tm=>tm.id===+templeF)?.name||"");
+
+  const doPrint=()=>{
+    const dayHeaders=DAYS.map(d=>"<th style='text-align:center'>"+dayN(d)+"</th>").join("");
+    const trows=rows.map(r=>{
+      const cells=DAYS.map(d=>"<td style='text-align:center'>"+(r.byDay[d]?"<strong>"+r.byDay[d]+" "+r.item.unit+"</strong>":"—")+"</td>").join("");
+      return "<tr><td><strong>"+n(r.item)+"</strong></td>"+cells+"<td style='text-align:center;background:#fffbe8'><strong>"+r.total+" "+r.item.unit+"</strong></td></tr>";
+    }).join("");
+    const thead="<thead><tr><th>"+t("Item","பொருள்")+"</th>"+dayHeaders+"<th>"+t("Weekly Total","வார மொத்தம்")+"</th></tr></thead>";
+    printHTML(t("Weekly Issue List","வார அனுப்புதல் பட்டியல்")+" ("+templeLabel+")",
+      "<p style='color:#9B7355;margin:0 0 12px;font-size:12px'>"+t("Temple","கோவில்")+": "+templeLabel+"</p><table>"+thead+"<tbody>"+trows+"</tbody></table>");
+  };
+
+  const doExport=()=>{
+    const data=rows.map(r=>{
+      const obj={[t("Item","பொருள்")]:n(r.item)};
+      DAYS.forEach(d=>{obj[dayN(d)]=r.byDay[d]||"";});
+      obj[t("Weekly Total","வார மொத்தம்")]=r.total;
+      obj[t("Unit","அலகு")]=r.item.unit;
+      return obj;
+    });
+    exportXlsxSheets("weekly_issue_list_"+templeF+".xlsx",[{name:"Weekly Issue",data}]);
+  };
+
+  return(
+    <div>
+      <ReportBar onPrint={hasData?doPrint:null} onExport={hasData?doExport:null} lang={lang} setLang={setLang}>
+        <div>
+          <label style={css.lbl}>{t("Temple","கோவில்")}</label>
+          <select style={{...css.sel,minWidth:180}} value={templeF} onChange={e=>setTempleF(e.target.value)}>
+            <option value="all">{t("All Temples","அனைத்து கோவில்கள்")}</option>
+            {poojaTemples.map(tm=><option key={tm.id} value={tm.id}>{n(tm)}</option>)}
+          </select>
+        </div>
+      </ReportBar>
+      {!hasData?(
+        <div style={{color:P.muted,textAlign:"center",padding:32}}>{t("No weekly schedule set up yet. Configure it in Temples & Lists.","அட்டவணை இல்லை.")}</div>
+      ):(
+        <div style={{...css.card,padding:0,overflow:"auto"}}>
+          <table style={css.table}>
+            <thead><tr>
+              <th style={css.th}>{t("Item","பொருள்")}</th>
+              {DAYS.map(d=><th key={d} style={{...css.th,textAlign:"center",minWidth:70}}>{dayN(d)}</th>)}
+              <th style={{...css.th,background:"#7C4A00",textAlign:"center"}}>{t("Weekly Total","வார மொத்தம்")}</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r,i)=>(
+                <tr key={r.item.id} style={{background:i%2===0?P.white:P.highlight}}>
+                  <td style={css.td}><strong>{n(r.item)}</strong></td>
+                  {DAYS.map(d=>(
+                    <td key={d} style={{...css.td,textAlign:"center"}}>
+                      {r.byDay[d]?<strong style={{color:P.saffron}}>{r.byDay[d]}</strong>:<span style={{color:"#DDD"}}>—</span>}
+                    </td>
+                  ))}
+                  <td style={{...css.td,textAlign:"center",background:"#FFFBE8"}}><strong>{r.total} {r.item.unit}</strong></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PoojaWeeklyShopPage({ctx}){
+  const {poojaTemples,poojaItems,lang:gLang}=ctx;
+  const [lang,setLang]=useState(gLang);
+  const t=(en,ta)=>lang==="en"?en:ta;
+  const n=(x)=>lang==="en"?x.name:(x.nameTamil||x.name);
+  const DAYS=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
+
+  const totals={};
+  poojaTemples.forEach(tm=>{
+    poojaItems.forEach(pi=>{
+      let sum=0;
+      DAYS.forEach(d=>{
+        const dd=tm.schedule?.[pi.id]?.[d]||{};
+        sum+=(+dd.morning||0)+(+dd.afternoon||0)+(+dd.evening||0);
+      });
+      if(!sum)return;
+      if(!totals[pi.id])totals[pi.id]={item:pi,total:0,byTemple:[]};
+      totals[pi.id].total+=sum;
+      totals[pi.id].byTemple.push({name:tm.name,qty:sum});
+    });
+  });
+  const rows=Object.values(totals).sort((a,b)=>n(a.item).localeCompare(n(b.item)));
+  const hasData=rows.length>0;
+
+  const doExport=()=>{
+    const data=rows.map((r,i)=>({
+      [t("Item","பொருள்")]:n(r.item),
+      [t("Unit","அலகு")]:r.item.unit,
+      [t("Weekly Total","வார மொத்தம்")]:r.total,
+      Available:"",
+      [t("To Purchase","வாங்க")]:{f:`IF(D${i+2}="",C${i+2},MAX(0,C${i+2}-D${i+2}))`},
+      [t("By Temple","கோவில் வாரியாக")]:r.byTemple.map(x=>x.name+"("+x.qty+")").join(", "),
+    }));
+    exportXlsxSheets("weekly_shopping_list.xlsx",[{name:"Weekly Shopping",data}]);
+  };
+
+  const doPrint=()=>{
+    const trows=rows.map(r=>"<tr><td><strong>"+n(r.item)+"</strong></td><td>"+r.total+" "+r.item.unit+"</td><td style='font-size:11px;color:#555'>"+r.byTemple.map(x=>x.name+": "+x.qty).join(", ")+"</td></tr>").join("");
+    printHTML(t("Weekly Shopping List — All Temples","வார கொள்முதல் பட்டியல்"),
+      "<table><thead><tr><th>"+t("Item","பொருள்")+"</th><th>"+t("Weekly Total","வார மொத்தம்")+"</th><th>"+t("By Temple","கோவில் வாரியாக")+"</th></tr></thead><tbody>"+trows+"</tbody></table>");
+  };
+
+  return(
+    <div>
+      <ReportBar onPrint={hasData?doPrint:null} onExport={hasData?doExport:null} lang={lang} setLang={setLang}>
+        <div style={{fontSize:11,color:P.muted,paddingBottom:6}}>{t("Sums the full weekly recurring schedule across all temples.","அனைத்து கோவில்களின் வார அட்டவணையை கூட்டுகிறது.")}</div>
+      </ReportBar>
+      {!hasData?(
+        <div style={{color:P.muted,textAlign:"center",padding:32}}>{t("No weekly schedule set up yet.","அட்டவணை இல்லை.")}</div>
+      ):(
+        <div style={{...css.card,padding:0,overflow:"hidden"}}>
+          <table style={css.table}>
+            <thead><tr>
+              <th style={css.th}>{t("Item","பொருள்")}</th>
+              <th style={{...css.th,textAlign:"center"}}>{t("Weekly Total","வார மொத்தம்")}</th>
+              <th style={css.th}>{t("By Temple","கோவில் வாரியாக")}</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r,i)=>(
+                <tr key={r.item.id} style={{background:i%2===0?P.white:P.highlight}}>
+                  <td style={css.td}><strong>{n(r.item)}</strong></td>
+                  <td style={{...css.td,textAlign:"center"}}><strong style={{color:P.saffron,fontSize:14}}>{r.total} {r.item.unit}</strong></td>
+                  <td style={css.td}><div style={{display:"flex",flexWrap:"wrap",gap:3}}>{r.byTemple.map((x,j)=><span key={j} style={{...css.badge(P.muted),fontSize:10}}>{x.name}: {x.qty}</span>)}</div></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OccTemplatesPage({ctx}){
   const {poojaItems,occTemplates,setOccTemplates,lang}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
@@ -3596,6 +3818,9 @@ function OccTemplatesPage({ctx}){
   const [form,setForm]=useState({name:"",nameTamil:""});
   const [openId,setOpenId]=useState(null);
   const [ni,setNi]=useState({itemId:"",qty:""});
+  const fRef=useRef();
+  const [importTarget,setImportTarget]=useState(null);
+  const [importMsg,setImportMsg]=useState({});
 
   const addTemplate=()=>{
     if(!form.name.trim())return;
@@ -3612,8 +3837,46 @@ function OccTemplatesPage({ctx}){
   const rmItem=(tplId,idx)=>setOccTemplates(p=>p.map(tp=>tp.id!==tplId?tp:{...tp,items:tp.items.filter((_,j)=>j!==idx)}));
   const changeItemQty=(tplId,idx,qty)=>setOccTemplates(p=>p.map(tp=>tp.id!==tplId?tp:{...tp,items:tp.items.map((it,j)=>j===idx?{...it,qty:+qty}:it)}));
 
+  const startImport=(tplId)=>{setImportTarget(tplId);fRef.current.click();};
+  const importXlsx=e=>{
+    const file=e.target.files[0]; if(!file||!importTarget)return;
+    const tplId=importTarget;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const wb=XLSX.read(ev.target.result,{type:"binary"});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+      const valid=rows.filter(r=>(r.name+"").trim()&&(r.qty!==""));
+      if(!valid.length){alert("No valid rows found. Make sure row 1 has headers: name, qty");return;}
+      let matched=0,unmatched=[];
+      const upserts=[];
+      valid.forEach(r=>{
+        const nameLC=(r.name+"").trim().toLowerCase();
+        const pi=poojaItems.find(x=>x.name.toLowerCase()===nameLC||(x.nameTamil||"").toLowerCase()===nameLC);
+        if(!pi){unmatched.push(r.name);return;}
+        matched++;
+        upserts.push({itemId:pi.id,qty:+r.qty});
+      });
+      setOccTemplates(p=>p.map(tp=>{
+        if(tp.id!==tplId)return tp;
+        const items=[...(tp.items||[])];
+        upserts.forEach(u=>{
+          const idx=items.findIndex(x=>x.itemId===u.itemId);
+          if(idx>=0)items[idx]={...items[idx],qty:u.qty};
+          else items.push(u);
+        });
+        return{...tp,items};
+      }));
+      setImportMsg(m=>({...m,[tplId]:matched+" imported"+(unmatched.length?", "+unmatched.length+" not found: "+unmatched.slice(0,5).join(", "):"")}));
+    };
+    reader.readAsBinaryString(file);
+    e.target.value="";
+    setImportTarget(null);
+  };
+
   return(
     <div>
+      <input ref={fRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importXlsx}/>
       <div style={css.card}>
         <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,color:P.deepBrown,marginBottom:12}}>
           🕉️ {t("New Occasion Template","புதிய மாதிரி")}
@@ -3653,14 +3916,19 @@ function OccTemplatesPage({ctx}){
             </div>
             {isOpen&&(
               <div style={{marginTop:12,borderTop:"1px solid #F0D8B0",paddingTop:12}}>
-                <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+                <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
                   <select style={{...css.sel,flex:2,minWidth:160}} value={ni.itemId} onChange={e=>setNi({...ni,itemId:e.target.value})}>
                     <option value="">{t("Select item...","தேர்வு...")}</option>
                     {poojaItems.map(pi=><option key={pi.id} value={pi.id}>{n(pi)} ({pi.unit})</option>)}
                   </select>
                   <input type="number" min="0" step="0.5" placeholder={t("Qty","அளவு")} style={{...css.inp,width:90}} value={ni.qty} onChange={e=>setNi({...ni,qty:e.target.value})}/>
                   <button style={css.btn()} onClick={()=>addItem(tpl.id)}>+ {t("Add","சேர்")}</button>
+                  <button style={css.btn("success",true)} onClick={()=>startImport(tpl.id)}>📤 {t("Import Excel","Excel இறக்கு")}</button>
                 </div>
+                <div style={{fontSize:11,color:P.muted,marginBottom:8}}>
+                  {t("Import expects column headers: name, qty (name matched against Items Master, English or Tamil).","தலைப்புகள்: name, qty.")}
+                </div>
+                {importMsg[tpl.id]&&<div style={{fontSize:11,color:P.success,marginBottom:8}}>✓ {importMsg[tpl.id]}</div>}
                 {(tpl.items||[]).length>0?(
                   <table style={css.table}>
                     <thead><tr><th style={css.th}>{t("Item","பொருள்")}</th><th style={css.th}>{t("Qty","அளவு")}</th><th style={css.th}></th></tr></thead>
@@ -3717,6 +3985,29 @@ function OccOrdersPage({ctx}){
 
   const delOrder=(id)=>{if(confirm(t("Delete this order?","நீக்கவா?")))setOccOrders(p=>p.filter(x=>x.id!==id));};
 
+  // Known remaining-2026 dates (Chennai/Tamil Nadu panchangam) for quick bulk creation
+  const BULK_DATES={
+    moolam:["2026-07-26","2026-08-22","2026-09-19","2026-10-16","2026-11-12","2026-12-09"],
+    uthiram:["2026-08-16","2026-09-12","2026-10-09","2026-11-05","2026-12-03","2026-12-30"],
+    pradosham:["2026-07-26","2026-08-10","2026-08-25","2026-09-08","2026-09-24","2026-10-08","2026-10-23","2026-11-06","2026-11-22","2026-12-06","2026-12-21"],
+  };
+  const [bulkMsg,setBulkMsg]=useState("");
+  const bulkCreate=(key,label)=>{
+    const tpl=occTemplates.find(x=>x.name.toLowerCase().includes(key));
+    if(!tpl){setBulkMsg(t("No template found named","")+" \""+label+"\" — "+t("create it first in Templates.","முதலில் மாதிரி உருவாக்கவும்."));return;}
+    const dates=BULK_DATES[key];
+    const existing=new Set(occOrders.filter(o=>o.templateId===tpl.id).map(o=>o.date));
+    const toCreate=dates.filter(d=>!existing.has(d));
+    if(!toCreate.length){setBulkMsg(t("All dates already have orders for","")+" "+tpl.name+".");return;}
+    const newOrders=toCreate.map((d,i)=>({
+      id:Date.now()+i,templateId:tpl.id,templateName:tpl.name,templateNameTamil:tpl.nameTamil,
+      date:d,items:(tpl.items||[]).map(it=>({...it})),
+    }));
+    setOccOrders(p=>[...p,...newOrders]);
+    setBulkMsg(toCreate.length+" "+t("order(s) created for","ஆர்டர்கள் உருவாக்கப்பட்டன")+" "+tpl.name+
+      (dates.length-toCreate.length>0?" ("+(dates.length-toCreate.length)+" "+t("already existed, skipped","ஏற்கனவே உள்ளன")+")":""));
+  };
+
   const addItem=(ordId)=>{
     if(!ni.itemId||!ni.qty)return;
     setOccOrders(p=>p.map(o=>o.id!==ordId?o:{...o,items:[...(o.items||[]),{itemId:+ni.itemId,qty:+ni.qty}]}));
@@ -3730,6 +4021,21 @@ function OccOrdersPage({ctx}){
 
   return(
     <div>
+      <div style={{...css.card,background:"#F3F0FF",border:"1px solid #C4B5FD"}}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:P.purple,marginBottom:8}}>
+          ⚡ {t("Bulk Create — Known 2026 Dates","குவிப்பு உருவாக்கம் — 2026 தேதிகள்")}
+        </div>
+        <div style={{fontSize:11,color:P.muted,marginBottom:10}}>
+          {t("Creates one order per remaining 2026 date, matched to a template by name (e.g. a template named \"Moolam\"). Existing dates are skipped automatically.","பெயர் பொருந்தும் மாதிரிக்கு ஆர்டர்கள் உருவாக்கப்படும்.")}
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button style={css.btn("primary")} onClick={()=>bulkCreate("moolam","Moolam")}>🌕 {t("Moolam (6 dates)","மூலம் (6)")}</button>
+          <button style={css.btn("info")} onClick={()=>bulkCreate("uthiram","Uthiram")}>⭐ {t("Uthiram (6 dates)","உத்திரம் (6)")}</button>
+          <button style={css.btn("success")} onClick={()=>bulkCreate("pradosham","Pradosham")}>🕉️ {t("Pradosham (11 dates)","பிரதோஷம் (11)")}</button>
+        </div>
+        {bulkMsg&&<div style={{fontSize:12,color:P.deepBrown,marginTop:10,fontWeight:600}}>{bulkMsg}</div>}
+      </div>
+
       <div style={css.card}>
         <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,color:P.deepBrown,marginBottom:12}}>
           + {t("New Occasion Order","புதிய ஆர்டர்")}
