@@ -390,9 +390,10 @@ function App(){
   const {loaded,saveStatus,forceSave,
     ingredients,setIngredients,recipes,setRecipes,
     orders,setOrders,inventory,setInventory,locations,setLocations,recipeTypes,setRecipeTypes,
-    poojaItems,setPoojaItems,poojaTemples,setPoojaTemples,poojaDels,setPoojaDels} = useKitchenData();
+    poojaItems,setPoojaItems,poojaTemples,setPoojaTemples,poojaDels,setPoojaDels,
+    occTemplates,setOccTemplates,occOrders,setOccOrders} = useKitchenData();
 
-  const ctx={lang,ingredients,setIngredients,recipes,setRecipes,locations,setLocations,orders,setOrders,inventory,setInventory,recipeTypes,setRecipeTypes,setModal,poojaItems,setPoojaItems,poojaTemples,setPoojaTemples,poojaDels,setPoojaDels};
+  const ctx={lang,ingredients,setIngredients,recipes,setRecipes,locations,setLocations,orders,setOrders,inventory,setInventory,recipeTypes,setRecipeTypes,setModal,poojaItems,setPoojaItems,poojaTemples,setPoojaTemples,poojaDels,setPoojaDels,occTemplates,setOccTemplates,occOrders,setOccOrders};
   const t=(en,ta)=>lang==="en"?en:ta;
 
   const NAV=[
@@ -414,6 +415,11 @@ function App(){
       {id:"pooja_temples",en:"Temples & Lists",ta:"கோவில்கள்"},
       {id:"pooja_dispatch",en:"Dispatch",ta:"அனுப்புதல்"},
       {id:"pooja_purchase",en:"Purchase Summary",ta:"கொள்முதல்"},
+    ]},
+    {id:"occasions",icon:"🕉️",en:"Temple Occasions",ta:"கோவில் சிறப்பு நாட்கள்",children:[
+      {id:"occ_templates",en:"Templates",ta:"மாதிரிகள்"},
+      {id:"occ_orders",en:"Orders",ta:"ஆர்டர்கள்"},
+      {id:"occ_purchase",en:"Purchase Planning",ta:"கொள்முதல் திட்டம்"},
     ]},
   ];
   const flat=NAV.flatMap(n=>n.children?[n,...n.children]:[n]);
@@ -473,6 +479,9 @@ function App(){
           {page==="pooja_temples"&&<PoojaTemplesPage ctx={ctx}/>}
           {page==="pooja_dispatch"&&<PoojaDispatchPage ctx={ctx}/>}
           {page==="pooja_purchase"&&<PoojaPurchasePage ctx={ctx}/>}
+          {page==="occ_templates"&&<OccTemplatesPage ctx={ctx}/>}
+          {page==="occ_orders"&&<OccOrdersPage ctx={ctx}/>}
+          {page==="occ_purchase"&&<OccPurchasePage ctx={ctx}/>}
         </div>
       </main>
 
@@ -3576,6 +3585,303 @@ function PoojaPurchasePage({ctx}){
 }
 
 
+
+// ════════════════════════════════════════════════════════════════════
+// TEMPLE OCCASIONS MODULE (Moolam/star, Ekadasi, Pradosham, Ashtami, Gurupooja...)
+// ════════════════════════════════════════════════════════════════════
+function OccTemplatesPage({ctx}){
+  const {poojaItems,occTemplates,setOccTemplates,lang}=ctx;
+  const t=(en,ta)=>lang==="en"?en:ta;
+  const n=(x)=>lang==="en"?x.name:(x.nameTamil||x.name);
+  const [form,setForm]=useState({name:"",nameTamil:""});
+  const [openId,setOpenId]=useState(null);
+  const [ni,setNi]=useState({itemId:"",qty:""});
+
+  const addTemplate=()=>{
+    if(!form.name.trim())return;
+    setOccTemplates(p=>[...p,{id:Date.now(),name:form.name.trim(),nameTamil:form.nameTamil.trim(),items:[]}]);
+    setForm({name:"",nameTamil:""});
+  };
+  const delTemplate=(id)=>{if(confirm(t("Delete this template?","இந்த மாதிரியை நீக்கவா?")))setOccTemplates(p=>p.filter(x=>x.id!==id));};
+
+  const addItem=(tplId)=>{
+    if(!ni.itemId||!ni.qty)return;
+    setOccTemplates(p=>p.map(tp=>tp.id!==tplId?tp:{...tp,items:[...(tp.items||[]),{itemId:+ni.itemId,qty:+ni.qty}]}));
+    setNi({itemId:"",qty:""});
+  };
+  const rmItem=(tplId,idx)=>setOccTemplates(p=>p.map(tp=>tp.id!==tplId?tp:{...tp,items:tp.items.filter((_,j)=>j!==idx)}));
+  const changeItemQty=(tplId,idx,qty)=>setOccTemplates(p=>p.map(tp=>tp.id!==tplId?tp:{...tp,items:tp.items.map((it,j)=>j===idx?{...it,qty:+qty}:it)}));
+
+  return(
+    <div>
+      <div style={css.card}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,color:P.deepBrown,marginBottom:12}}>
+          🕉️ {t("New Occasion Template","புதிய மாதிரி")}
+        </div>
+        <div style={{fontSize:11,color:P.muted,marginBottom:10}}>
+          {t("e.g. Moolam, a specific star, Ekadasi, Pradosham, Ashtami, Gurupooja — each with its own fixed item list.","எ.கா. மூலம், நட்சத்திரம், ஏகாதசி, பிரதோஷம், அஷ்டமி, குருபூஜை.")}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+          <div><label style={css.lbl}>{t("Name","பெயர்")}</label>
+            <input style={css.inp} value={form.name} onChange={e=>setForm({...form,name:e.target.value})} onKeyDown={e=>e.key==="Enter"&&addTemplate()} placeholder="Moolam"/>
+          </div>
+          <div><label style={css.lbl}>{t("Tamil Name","தமிழ் பெயர்")}</label>
+            <input style={{...css.inp,fontFamily:"Noto Sans Tamil"}} value={form.nameTamil} onChange={e=>setForm({...form,nameTamil:e.target.value})} placeholder="மூலம்"/>
+          </div>
+        </div>
+        <button style={css.btn()} onClick={addTemplate}>+ {t("Add Template","சேர்")}</button>
+      </div>
+
+      {!poojaItems.length&&(
+        <div style={{...css.card,color:"#92400E",background:"#FFF3CD",border:"1px solid #F59E0B",textAlign:"center"}}>
+          ⚠️ {t("Add items in Pooja Material → Items Master first, then build templates here.","முதலில் Items Master-இல் பொருட்கள் சேர்க்கவும்.")}
+        </div>
+      )}
+
+      {occTemplates.map(tpl=>{
+        const isOpen=openId===tpl.id;
+        return(
+          <div key={tpl.id} style={{...css.card,marginBottom:12}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <strong style={{color:P.deepBrown,fontSize:14}}>{n(tpl)}</strong>
+              <div style={{display:"flex",gap:6}}>
+                <button style={css.btn(isOpen?"primary":"ghost",true)} onClick={()=>setOpenId(isOpen?null:tpl.id)}>
+                  {isOpen?"▲":"▼"} {t("Items","பொருட்கள்")} <span style={{marginLeft:4,fontSize:11,opacity:0.8}}>({(tpl.items||[]).length})</span>
+                </button>
+                <button style={css.btn("danger",true)} onClick={()=>delTemplate(tpl.id)}>🗑</button>
+              </div>
+            </div>
+            {isOpen&&(
+              <div style={{marginTop:12,borderTop:"1px solid #F0D8B0",paddingTop:12}}>
+                <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+                  <select style={{...css.sel,flex:2,minWidth:160}} value={ni.itemId} onChange={e=>setNi({...ni,itemId:e.target.value})}>
+                    <option value="">{t("Select item...","தேர்வு...")}</option>
+                    {poojaItems.map(pi=><option key={pi.id} value={pi.id}>{n(pi)} ({pi.unit})</option>)}
+                  </select>
+                  <input type="number" min="0" step="0.5" placeholder={t("Qty","அளவு")} style={{...css.inp,width:90}} value={ni.qty} onChange={e=>setNi({...ni,qty:e.target.value})}/>
+                  <button style={css.btn()} onClick={()=>addItem(tpl.id)}>+ {t("Add","சேர்")}</button>
+                </div>
+                {(tpl.items||[]).length>0?(
+                  <table style={css.table}>
+                    <thead><tr><th style={css.th}>{t("Item","பொருள்")}</th><th style={css.th}>{t("Qty","அளவு")}</th><th style={css.th}></th></tr></thead>
+                    <tbody>
+                      {tpl.items.map((it,i)=>{
+                        const pi=poojaItems.find(x=>x.id===it.itemId);
+                        return(
+                          <tr key={i} style={{background:i%2===0?P.white:P.highlight}}>
+                            <td style={css.td}><strong>{pi?n(pi):"?"}</strong></td>
+                            <td style={css.td}>
+                              <div style={{display:"flex",alignItems:"center",gap:4}}>
+                                <input type="number" step="0.5" style={{...css.inp,width:80,padding:"3px 6px"}} value={it.qty} onChange={e=>changeItemQty(tpl.id,i,e.target.value)}/>
+                                <span style={{fontSize:11,color:P.muted}}>{pi?.unit}</span>
+                              </div>
+                            </td>
+                            <td style={css.td}><button style={css.btn("danger",true)} onClick={()=>rmItem(tpl.id,i)}>✕</button></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                ):<div style={{color:P.muted,fontSize:12,textAlign:"center",padding:10}}>{t("No items yet.","பொருட்கள் இல்லை.")}</div>}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {!occTemplates.length&&<div style={{...css.card,textAlign:"center",color:P.muted,padding:24}}>{t("No templates yet. Add one above (e.g. Moolam, Ekadasi, Pradosham, Ashtami, Gurupooja).","மாதிரிகள் இல்லை.")}</div>}
+    </div>
+  );
+}
+
+function OccOrdersPage({ctx}){
+  const {poojaItems,occTemplates,occOrders,setOccOrders,lang}=ctx;
+  const t=(en,ta)=>lang==="en"?en:ta;
+  const n=(x)=>lang==="en"?x.name:(x.nameTamil||x.name);
+  const [tplId,setTplId]=useState("");
+  const [date,setDate]=useState(TODAY);
+  const [openId,setOpenId]=useState(null);
+  const [ni,setNi]=useState({itemId:"",qty:""});
+  const [dateQ,setDateQ]=useState("");
+
+  const createOrder=()=>{
+    if(!tplId){alert(t("Select a template","மாதிரி தேர்வு செய்யவும்"));return;}
+    const tpl=occTemplates.find(x=>x.id===+tplId);
+    if(!tpl)return;
+    const newOrd={
+      id:Date.now(),templateId:tpl.id,templateName:tpl.name,templateNameTamil:tpl.nameTamil,
+      date,items:(tpl.items||[]).map(it=>({...it})),
+    };
+    setOccOrders(p=>[...p,newOrd]);
+    setOpenId(newOrd.id);
+  };
+
+  const delOrder=(id)=>{if(confirm(t("Delete this order?","நீக்கவா?")))setOccOrders(p=>p.filter(x=>x.id!==id));};
+
+  const addItem=(ordId)=>{
+    if(!ni.itemId||!ni.qty)return;
+    setOccOrders(p=>p.map(o=>o.id!==ordId?o:{...o,items:[...(o.items||[]),{itemId:+ni.itemId,qty:+ni.qty}]}));
+    setNi({itemId:"",qty:""});
+  };
+  const rmItem=(ordId,idx)=>setOccOrders(p=>p.map(o=>o.id!==ordId?o:{...o,items:o.items.filter((_,j)=>j!==idx)}));
+  const changeItemQty=(ordId,idx,qty)=>setOccOrders(p=>p.map(o=>o.id!==ordId?o:{...o,items:o.items.map((it,j)=>j===idx?{...it,qty:+qty}:it)}));
+
+  const filtered=[...occOrders].sort((a,b)=>b.date.localeCompare(a.date))
+    .filter(o=>!dateQ||o.date.replace(/-/g,"").includes(dateQ.replace(/-/g,"")));
+
+  return(
+    <div>
+      <div style={css.card}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,color:P.deepBrown,marginBottom:12}}>
+          + {t("New Occasion Order","புதிய ஆர்டர்")}
+        </div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <div>
+            <label style={css.lbl}>{t("Template","மாதிரி")}</label>
+            <select style={{...css.sel,minWidth:200}} value={tplId} onChange={e=>setTplId(e.target.value)}>
+              <option value="">{t("Select template...","மாதிரி தேர்வு...")}</option>
+              {occTemplates.map(tp=><option key={tp.id} value={tp.id}>{n(tp)}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={css.lbl}>{t("Date","தேதி")}</label>
+            <input type="date" style={css.inp} value={date} onChange={e=>setDate(e.target.value)}/>
+          </div>
+          <button style={css.btn()} onClick={createOrder}>+ {t("Create Order","ஆர்டர் உருவாக்கு")}</button>
+        </div>
+        {!occTemplates.length&&<div style={{fontSize:11,color:P.danger,marginTop:8}}>{t("No templates yet — create one in Templates first.","முதலில் மாதிரி உருவாக்கவும்.")}</div>}
+      </div>
+
+      <input type="date" style={{...css.inp,width:160,marginBottom:12}} placeholder="Filter by date" value={dateQ} onChange={e=>setDateQ(e.target.value)}/>
+
+      {filtered.map(ord=>{
+        const isOpen=openId===ord.id;
+        return(
+          <div key={ord.id} style={{...css.card,marginBottom:12}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div>
+                <strong style={{color:P.deepBrown,fontSize:14}}>{lang==="en"?ord.templateName:(ord.templateNameTamil||ord.templateName)}</strong>
+                <span style={{fontSize:12,color:P.muted,marginLeft:8}}>{ord.date}</span>
+              </div>
+              <div style={{display:"flex",gap:6}}>
+                <button style={css.btn(isOpen?"primary":"ghost",true)} onClick={()=>setOpenId(isOpen?null:ord.id)}>
+                  {isOpen?"▲":"▼"} {(ord.items||[]).length} {t("items","பொருட்கள்")}
+                </button>
+                <button style={css.btn("danger",true)} onClick={()=>delOrder(ord.id)}>🗑</button>
+              </div>
+            </div>
+            {isOpen&&(
+              <div style={{marginTop:12,borderTop:"1px solid #F0D8B0",paddingTop:12}}>
+                <div style={{fontSize:11,color:P.muted,marginBottom:8}}>{t("Add extra items here for one-off issues on top of the template.","கூடுதல் பொருட்களை இங்கு சேர்க்கலாம்.")}</div>
+                <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+                  <select style={{...css.sel,flex:2,minWidth:160}} value={ni.itemId} onChange={e=>setNi({...ni,itemId:e.target.value})}>
+                    <option value="">{t("Add extra item...","கூடுதல் பொருள்...")}</option>
+                    {poojaItems.map(pi=><option key={pi.id} value={pi.id}>{n(pi)} ({pi.unit})</option>)}
+                  </select>
+                  <input type="number" min="0" step="0.5" placeholder={t("Qty","அளவு")} style={{...css.inp,width:90}} value={ni.qty} onChange={e=>setNi({...ni,qty:e.target.value})}/>
+                  <button style={css.btn("success")} onClick={()=>addItem(ord.id)}>+ {t("Add","சேர்")}</button>
+                </div>
+                <table style={css.table}>
+                  <thead><tr><th style={css.th}>{t("Item","பொருள்")}</th><th style={css.th}>{t("Qty","அளவு")}</th><th style={css.th}></th></tr></thead>
+                  <tbody>
+                    {(ord.items||[]).map((it,i)=>{
+                      const pi=poojaItems.find(x=>x.id===it.itemId);
+                      return(
+                        <tr key={i} style={{background:i%2===0?P.white:P.highlight}}>
+                          <td style={css.td}><strong>{pi?n(pi):"?"}</strong></td>
+                          <td style={css.td}>
+                            <div style={{display:"flex",alignItems:"center",gap:4}}>
+                              <input type="number" step="0.5" style={{...css.inp,width:80,padding:"3px 6px"}} value={it.qty} onChange={e=>changeItemQty(ord.id,i,e.target.value)}/>
+                              <span style={{fontSize:11,color:P.muted}}>{pi?.unit}</span>
+                            </div>
+                          </td>
+                          <td style={css.td}><button style={css.btn("danger",true)} onClick={()=>rmItem(ord.id,i)}>✕</button></td>
+                        </tr>
+                      );
+                    })}
+                    {!(ord.items||[]).length&&<tr><td colSpan={3} style={{...css.td,textAlign:"center",color:P.muted}}>{t("No items.","பொருட்கள் இல்லை.")}</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {!filtered.length&&<div style={{...css.card,textAlign:"center",color:P.muted,padding:24}}>{t("No occasion orders found.","ஆர்டர்கள் இல்லை.")}</div>}
+    </div>
+  );
+}
+
+function OccPurchasePage({ctx}){
+  const {poojaItems,occOrders,lang:gLang}=ctx;
+  const [lang,setLang]=useState(gLang);
+  const t=(en,ta)=>lang==="en"?en:ta;
+  const n=(x)=>lang==="en"?x.name:(x.nameTamil||x.name);
+  const [fromDate,setFromDate]=useState(TODAY);
+  const [toDate,setToDate]=useState(TODAY);
+
+  const matching=occOrders.filter(o=>o.date>=fromDate&&o.date<=toDate);
+
+  const totals={};
+  matching.forEach(o=>{
+    (o.items||[]).forEach(it=>{
+      const pi=poojaItems.find(x=>x.id===it.itemId); if(!pi)return;
+      if(!totals[it.itemId])totals[it.itemId]={item:pi,qty:0,occasions:[]};
+      totals[it.itemId].qty+=(+it.qty||0);
+      totals[it.itemId].occasions.push({name:(lang==="en"?o.templateName:(o.templateNameTamil||o.templateName)),date:o.date,qty:it.qty});
+    });
+  });
+  const rows=Object.values(totals).sort((a,b)=>n(a.item).localeCompare(n(b.item)));
+
+  const doExport=()=>{
+    const data=rows.map(r=>({
+      [t("Item","பொருள்")]:n(r.item),
+      [t("Unit","அலகு")]:r.item.unit,
+      [t("Total Qty","மொத்த அளவு")]:r.qty,
+      [t("Occasions","சிறப்பு நாட்கள்")]:r.occasions.map(o=>o.name+" ("+o.date+"): "+o.qty).join("; "),
+    }));
+    exportXlsxSheets("occasion_purchase_"+fromDate+"_to_"+toDate+".xlsx",[{name:"Purchase Planning",data}]);
+  };
+
+  const doPrint=()=>{
+    const trows=rows.map(r=>"<tr><td><strong>"+n(r.item)+"</strong></td><td>"+r.qty+" "+r.item.unit+"</td><td style='font-size:11px;color:#555'>"+r.occasions.map(o=>o.name+" ("+o.date+")").join(", ")+"</td></tr>").join("");
+    printHTML(t("Temple Occasions — Purchase Planning","கோவில் சிறப்பு நாட்கள் — கொள்முதல்")+" ("+fromDate+" – "+toDate+")",
+      "<table><thead><tr><th>"+t("Item","பொருள்")+"</th><th>"+t("Total Qty","மொத்த அளவு")+"</th><th>"+t("Occasions","சிறப்பு நாட்கள்")+"</th></tr></thead><tbody>"+trows+"</tbody></table>");
+  };
+
+  return(
+    <div>
+      <ReportBar onPrint={rows.length>0?doPrint:null} onExport={rows.length>0?doExport:null} lang={lang} setLang={setLang}>
+        <div>
+          <label style={css.lbl}>{t("From","இருந்து")}</label>
+          <input type="date" style={{...css.inp,width:150}} value={fromDate} onChange={e=>{setFromDate(e.target.value);if(e.target.value>toDate)setToDate(e.target.value);}}/>
+        </div>
+        <div>
+          <label style={css.lbl}>{t("To","வரை")}</label>
+          <input type="date" style={{...css.inp,width:150}} value={toDate} onChange={e=>{setToDate(e.target.value);if(e.target.value<fromDate)setFromDate(e.target.value);}}/>
+        </div>
+        <div style={{fontSize:11,color:P.muted,paddingBottom:6}}>{matching.length} {t("order(s) in range","ஆர்டர்கள்")}</div>
+      </ReportBar>
+      {!rows.length?(
+        <div style={{color:P.muted,textAlign:"center",padding:32}}>{t("No occasion orders in this date range.","இந்த வரம்பில் ஆர்டர் இல்லை.")}</div>
+      ):(
+        <div style={{...css.card,padding:0,overflow:"hidden"}}>
+          <table style={css.table}>
+            <thead><tr><th style={css.th}>{t("Item","பொருள்")}</th><th style={css.th}>{t("Total Qty","மொத்த அளவு")}</th><th style={css.th}>{t("Occasions","சிறப்பு நாட்கள்")}</th></tr></thead>
+            <tbody>
+              {rows.map((r,i)=>(
+                <tr key={r.item.id} style={{background:i%2===0?P.white:P.highlight}}>
+                  <td style={css.td}><strong>{n(r.item)}</strong></td>
+                  <td style={css.td}><strong style={{color:P.saffron}}>{r.qty} {r.item.unit}</strong></td>
+                  <td style={{...css.td,fontSize:11}}>{r.occasions.map((o,j)=><div key={j}>{o.name} ({o.date}): {o.qty} {r.item.unit}</div>)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function InvPage({ctx}){
   const {ingredients,inventory,setInventory,lang,setModal}=ctx;

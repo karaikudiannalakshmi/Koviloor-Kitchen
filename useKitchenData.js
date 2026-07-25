@@ -33,11 +33,13 @@ export function useKitchenData() {
   const [poojaItems,   _setPoojaItems]   = useState([]);
   const [poojaTemples, _setPoojaTemples] = useState([]);
   const [poojaDels,    _setPoojaDels]    = useState([]);
+  const [occTemplates, _setOccTemplates] = useState([]);
+  const [occOrders,    _setOccOrders]    = useState([]);
 
   // Stable refs — always current, never stale
   const kit = useRef({ orders:[], inventory:{purchases:[],issues:[]}, locations:[], recipeTypes:[] });
   const cat = useRef({ recipes:[], ingredients:[] });
-  const poo = useRef({ poojaItems:[], poojaTemples:[], poojaDels:[] });
+  const poo = useRef({ poojaItems:[], poojaTemples:[], poojaDels:[], occTemplates:[], occOrders:[] });
 
   const saveTimer  = useRef(null);
   const kitSaving  = useRef(false);
@@ -99,16 +101,20 @@ export function useKitchenData() {
     const ref = doc(db, COL, POOJA_DOC);
     return onSnapshot(ref, snap => {
       const d = snap.exists() ? snap.data() : null;
-      const data = d || { poojaItems:[], poojaTemples:[], poojaDels:[] };
+      const data = d || { poojaItems:[], poojaTemples:[], poojaDels:[], occTemplates:[], occOrders:[] };
       if (!d) setDoc(ref, clean(data));
       if (!pooSaving.current) {
         poo.current.poojaItems   = data.poojaItems   ?? [];
         poo.current.poojaTemples = data.poojaTemples ?? [];
         poo.current.poojaDels    = data.poojaDels    ?? [];
+        poo.current.occTemplates = data.occTemplates ?? [];
+        poo.current.occOrders    = data.occOrders    ?? [];
       }
       _setPoojaItems(data.poojaItems   ?? []);
       _setPoojaTemples(data.poojaTemples ?? []);
       _setPoojaDels(data.poojaDels    ?? []);
+      _setOccTemplates(data.occTemplates ?? []);
+      _setOccOrders(data.occOrders    ?? []);
       pooOK.current = true; checkLoaded();
     }, err => { console.error("Pooja:", err); pooOK.current=true; checkLoaded(); });
   }, []);
@@ -218,5 +224,7 @@ export function useKitchenData() {
     poojaItems,   setPoojaItems:   makePooSet("poojaItems",   _setPoojaItems),
     poojaTemples, setPoojaTemples: makePooSet("poojaTemples", _setPoojaTemples),
     poojaDels,    setPoojaDels:    makePooSet("poojaDels",    _setPoojaDels),
+    occTemplates, setOccTemplates: makePooSet("occTemplates", _setOccTemplates),
+    occOrders,    setOccOrders:    makePooSet("occOrders",    _setOccOrders),
   };
 }
