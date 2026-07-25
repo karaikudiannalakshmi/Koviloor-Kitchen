@@ -1381,6 +1381,7 @@ function OrdersPage({ctx}){
   const [dupOpen,setDupOpen]=useState(false);
   const [dupFrom,setDupFrom]=useState(TODAY);
   const [dupTo,setDupTo]=useState(TODAY);
+  const [dupSess,setDupSess]=useState("All");
 
   const filtReal=[...real]
     .sort((a,b)=>b.date.localeCompare(a.date))
@@ -1396,20 +1397,25 @@ function OrdersPage({ctx}){
     setModal({type:"order",ord:newOrd});
   };
 
+  const dupMatchCount=orders.filter(o=>!o.isTemplate&&o.date===dupFrom)
+    .flatMap(o=>o.entries||[])
+    .filter(e=>dupSess==="All"||e.session===dupSess).length;
+
   const duplicateDay=()=>{
     if(!dupFrom||!dupTo)return;
     if(dupFrom===dupTo){alert(t("Source and target date are the same.","இருந்து மற்றும் புதிய தேதி ஒன்றே."));return;}
-    const toDup=orders.filter(o=>!o.isTemplate&&o.date===dupFrom);
-    if(!toDup.length){alert(t("No orders found on that date.","அந்த தேதியில் ஆர்டர் இல்லை."));return;}
-    const copies=toDup.map((o,i)=>({
-      ...o,
-      id:Date.now()+i,
-      date:dupTo,
-      entries:(o.entries||[]).map(e=>({...e})),
-    }));
+    const source=orders.filter(o=>!o.isTemplate&&o.date===dupFrom);
+    if(!source.length){alert(t("No orders found on that date.","அந்த தேதியில் ஆர்டர் இல்லை."));return;}
+    const copies=[];
+    source.forEach((o,i)=>{
+      const entries=(o.entries||[]).filter(e=>dupSess==="All"||e.session===dupSess);
+      if(!entries.length)return;
+      copies.push({...o,id:Date.now()+i,date:dupTo,entries:entries.map(e=>({...e}))});
+    });
+    if(!copies.length){alert(t("No entries found for that date and session.","அந்த தேதி / அமர்வுக்கு பதிவுகள் இல்லை."));return;}
     setOrders(p=>[...p,...copies]);
     setDupOpen(false);
-    alert(copies.length+" "+t("order(s) duplicated to","ஆர்டர்(கள்) நகலெடுக்கப்பட்டன")+" "+dupTo);
+    alert(copies.length+" "+t("order(s) duplicated to","ஆர்டர்(கள்) நகலெடுக்கப்பட்டன")+" "+dupTo+(dupSess!=="All"?" ("+dupSess+")":""));
   };
 
   return(
@@ -1430,11 +1436,23 @@ function OrdersPage({ctx}){
             <input type="date" style={{...css.inp,width:150}} value={dupFrom} onChange={e=>setDupFrom(e.target.value)}/>
           </div>
           <div>
+            <label style={css.lbl}>{t("Session","அமர்வு")}</label>
+            <div style={{display:"flex",gap:4}}>
+              {["All",...SESSIONS].map(s=>(
+                <button key={s} style={{...css.btn(dupSess===s?"primary":"ghost",true),
+                  borderColor:s!=="All"?(SCOLOR[s]||P.muted):"#DCC88A",
+                  color:dupSess===s?"white":(s!=="All"?SCOLOR[s]:P.deepBrown),
+                  background:dupSess===s?(SCOLOR[s]||P.saffron):"transparent",
+                }} onClick={()=>setDupSess(s)}>{s==="All"?t("All","அனைத்தும்"):s}</button>
+              ))}
+            </div>
+          </div>
+          <div>
             <label style={css.lbl}>{t("To date","புதிய தேதி")}</label>
             <input type="date" style={{...css.inp,width:150}} value={dupTo} onChange={e=>setDupTo(e.target.value)}/>
           </div>
           <div style={{fontSize:11,color:P.muted,paddingBottom:8}}>
-            {orders.filter(o=>!o.isTemplate&&o.date===dupFrom).length} {t("order(s) found on source date","ஆர்டர்(கள்) கிடைத்தன")}
+            {dupMatchCount} {t("entry(ies) found for that date/session","பதிவுகள் கிடைத்தன")}
           </div>
           <button style={css.btn("success")} onClick={duplicateDay}>✓ {t("Duplicate","நகலெடு")}</button>
           <button style={css.btn("ghost")} onClick={()=>setDupOpen(false)}>{t("Cancel","ரத்து")}</button>
