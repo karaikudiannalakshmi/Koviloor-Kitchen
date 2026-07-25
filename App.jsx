@@ -221,7 +221,7 @@ function printHTML(title, htmlContent, extraHead="") {
     td{padding:4px 6px;border-bottom:1px solid #DDD;font-size:13px;}
     tr:nth-child(even) td{background:#F5F5F5;}
     .hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
-    @media print{.no-print{display:none;}body{margin:10px;}@page{margin:15mm;}}
+    @media print{.no-print{display:none;}body{margin:8px;}@page{margin:10mm;}}
   `;
   const date=new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
   const fullHtml='<!DOCTYPE html><html><head><meta charset="utf-8">'+extraHead+'<title>'+title+'</title><style>'+css+'</style></head><body>'
@@ -1934,7 +1934,7 @@ function RepDish({ctx}){
           <td style="padding:3px 4px;font-size:13px;font-weight:500">${n(r.d)}</td>
           <td style="padding:3px 0 3px 4px;text-align:right;font-size:13px;font-weight:700;white-space:nowrap">${r.qty.toFixed(3)} ${r.unit}</td>
         </tr>`).join('');
-        return `<div style="margin:8px 0 10px 24px;border-left:2px solid #999;padding-left:10px">
+        return `<div style="margin:6px 0 8px 24px;border-left:2px solid #999;padding-left:10px">
           <div style="display:flex;align-items:baseline;border-bottom:1px solid #BBB;padding-bottom:3px;margin-bottom:4px">
             <span style="font-size:14px;font-weight:700;flex:1">${n(d)} *</span>
             <span style="font-size:15px;font-weight:800">${qty.toFixed(3)} ${unit}</span>
@@ -1943,7 +1943,7 @@ function RepDish({ctx}){
         </div>`;
       }).join('');
 
-      return `<div style="margin-bottom:22px;page-break-inside:avoid">
+      return `<div style="margin-bottom:12px">
         <div style="display:flex;align-items:baseline;border-bottom:2px solid #000;padding-bottom:5px;margin-bottom:6px">
           <span style="font-size:13px;font-weight:600;color:#555;margin-right:6px">${recNo}</span>
           <span style="font-size:16px;font-weight:700;flex:1">${n(rec)}</span>
