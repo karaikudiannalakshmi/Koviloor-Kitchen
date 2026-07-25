@@ -1330,7 +1330,27 @@ function RecForm({ctx,rec,onClose}){
       </div>
       {(f.ingredients||[]).length>0&&<table style={{...css.table,marginBottom:14}}>
         <thead><tr><th style={css.th}>{t("Ingredient","பொருள்")}</th><th style={css.th}>{t("Qty","அளவு")}</th><th style={css.th}></th></tr></thead>
-        <tbody>{(f.ingredients||[]).map((ing,i)=>{const d=ingredients.find(x=>x.id===ing.iid);return(<tr key={i}><td style={css.td}>{d?(lang==="en"?d.name:d.nameTamil):ing.iid}</td><td style={css.td}>{ing.qty} {ing.unit}</td><td style={css.td}><button style={css.btn("danger",true)} onClick={()=>setF(x=>({...x,ingredients:x.ingredients.filter((_,j)=>j!==i)}))}>✕</button></td></tr>);})}</tbody>
+        <tbody>{(f.ingredients||[]).map((ing,i)=>{
+          const d=ingredients.find(x=>x.id===ing.iid);
+          return(
+            <tr key={i}>
+              <td style={css.td}>{d?(lang==="en"?d.name:d.nameTamil):ing.iid}</td>
+              <td style={css.td}>
+                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                  <input type="number" step="0.01" style={{...css.inp,width:75,padding:"3px 6px"}}
+                    value={ing.qty}
+                    onChange={ev=>setF(x=>({...x,ingredients:x.ingredients.map((l,j)=>j===i?{...l,qty:+ev.target.value}:l)}))}/>
+                  <select style={{...css.sel,padding:"3px 6px",fontSize:11}}
+                    value={ing.unit}
+                    onChange={ev=>setF(x=>({...x,ingredients:x.ingredients.map((l,j)=>j===i?{...l,unit:ev.target.value}:l)}))}>
+                    {["kg","g","L","ml","nos","tsp","tbsp"].map(u=><option key={u}>{u}</option>)}
+                  </select>
+                </div>
+              </td>
+              <td style={css.td}><button style={css.btn("danger",true)} onClick={()=>setF(x=>({...x,ingredients:x.ingredients.filter((_,j)=>j!==i)}))}>✕</button></td>
+            </tr>
+          );
+        })}</tbody>
       </table>}
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
         <button style={css.btn("ghost")} onClick={onClose}>{t("Cancel","ரத்து")}</button>
