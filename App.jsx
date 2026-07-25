@@ -416,7 +416,7 @@ function App(){
       {id:"pooja_dispatch",en:"Dispatch",ta:"அனுப்புதல்"},
       {id:"pooja_purchase",en:"Purchase Summary",ta:"கொள்முதல்"},
       {id:"pooja_weekly",en:"Weekly Issue List",ta:"வார அனுப்புதல் பட்டியல்"},
-      {id:"pooja_weekshop",en:"Weekly Shopping List",ta:"வார கொள்முதல் பட்டியல்"},
+      {id:"pooja_weekshop",en:"Shopping List (Range)",ta:"கொள்முதல் பட்டியல் (வரம்பு)"},
     ]},
     {id:"occasions",icon:"🕉️",en:"Temple Occasions",ta:"கோவில் சிறப்பு நாட்கள்",children:[
       {id:"occ_templates",en:"Templates",ta:"மாதிரிகள்"},
@@ -3739,68 +3739,131 @@ function PoojaWeeklyIssuePage({ctx}){
 }
 
 function PoojaWeeklyShopPage({ctx}){
-  const {poojaTemples,poojaItems,lang:gLang}=ctx;
+  const {poojaTemples,poojaItems,occOrders,lang:gLang}=ctx;
   const [lang,setLang]=useState(gLang);
   const t=(en,ta)=>lang==="en"?en:ta;
   const n=(x)=>lang==="en"?x.name:(x.nameTamil||x.name);
-  const DAYS=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
-
-  const totals={};
-  poojaTemples.forEach(tm=>{
-    poojaItems.forEach(pi=>{
-      let sum=0;
-      DAYS.forEach(d=>{
-        const dd=tm.schedule?.[pi.id]?.[d]||{};
-        sum+=(+dd.morning||0)+(+dd.afternoon||0)+(+dd.evening||0);
-      });
-      if(!sum)return;
-      if(!totals[pi.id])totals[pi.id]={item:pi,total:0,byTemple:[]};
-      totals[pi.id].total+=sum;
-      totals[pi.id].byTemple.push({name:tm.name,qty:sum});
-    });
+  const [fromDate,setFromDate]=useState(TODAY);
+  const [toDate,setToDate]=useState(()=>{
+    const d=new Date(TODAY); d.setDate(d.getDate()+6); return d.toISOString().slice(0,10);
   });
-  const rows=Object.values(totals).sort((a,b)=>n(a.item).localeCompare(n(b.item)));
+
+  const DAYS=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+
+  const sortedDates=useMemo(()=>{
+    const dates=[]; const start=new Date(fromDate); const end=new Date(toDate);
+    if(start>end)return[fromDate];
+    const cur=new Date(start);
+    while(cur<=end){dates.push(cur.toISOString().slice(0,10));cur.setDate(cur.getDate()+1);}
+    return dates;
+  },[fromDate,toDate]);
+
+  // Build dynamic columns: one per temple + one per distinct occasion template name used in range
+  const { rows, columns } = useMemo(()=>{
+    const templeCols=poojaTemples.map(tm=>({key:"tm_"+tm.id,label:tm.name,type:"temple",id:tm.id}));
+    const occNames=[...new Set(
+      occOrders.filter(o=>sortedDates.includes(o.date)).map(o=>o.templateName)
+    )];
+    const occCols=occNames.map(nm=>({key:"occ_"+nm,label:nm,type:"occasion"}));
+    const columns=[...templeCols,...occCols];
+
+    const data={}; // itemId -> { colKey: qty }
+    // Temple recurring schedule, expanded across each date in range
+    sortedDates.forEach(dt=>{
+      const dow=DAYS[new Date(dt).getDay()];
+      poojaTemples.forEach(tm=>{
+        poojaItems.forEach(pi=>{
+          const dd=tm.schedule?.[pi.id]?.[dow]||{};
+          const sum=(+dd.morning||0)+(+dd.afternoon||0)+(+dd.evening||0);
+          if(!sum)return;
+          if(!data[pi.id])data[pi.id]={};
+          const key="tm_"+tm.id;
+          data[pi.id][key]=(data[pi.id][key]||0)+sum;
+        });
+      });
+    });
+    // Occasion orders within range
+    occOrders.filter(o=>sortedDates.includes(o.date)).forEach(o=>{
+      (o.items||[]).forEach(it=>{
+        if(!data[it.itemId])data[it.itemId]={};
+        const key="occ_"+o.templateName;
+        data[it.itemId][key]=(data[it.itemId][key]||0)+(+it.qty||0);
+      });
+    });
+
+    const rows=poojaItems.map(pi=>{
+      const byCol=data[pi.id]||{};
+      const total=Object.values(byCol).reduce((s,v)=>s+v,0);
+      return{item:pi,byCol,total};
+    }).filter(r=>r.total>0).sort((a,b)=>n(a.item).localeCompare(n(b.item)));
+
+    return{rows,columns:columns.filter(c=>rows.some(r=>r.byCol[c.key]))};
+  },[sortedDates,poojaTemples,poojaItems,occOrders,lang]);
+
   const hasData=rows.length>0;
 
   const doExport=()=>{
-    const data=rows.map((r,i)=>({
-      [t("Item","பொருள்")]:n(r.item),
-      [t("Unit","அலகு")]:r.item.unit,
-      [t("Weekly Total","வார மொத்தம்")]:r.total,
-      Available:"",
-      [t("To Purchase","வாங்க")]:{f:`IF(D${i+2}="",C${i+2},MAX(0,C${i+2}-D${i+2}))`},
-      [t("By Temple","கோவில் வாரியாக")]:r.byTemple.map(x=>x.name+"("+x.qty+")").join(", "),
-    }));
-    exportXlsxSheets("weekly_shopping_list.xlsx",[{name:"Weekly Shopping",data}]);
+    const data=rows.map(r=>{
+      const obj={[t("Item","பொருள்")]:n(r.item),[t("Unit","அலகு")]:r.item.unit};
+      columns.forEach(c=>{obj[c.label]=r.byCol[c.key]||"";});
+      obj[t("Total","மொத்தம்")]=r.total;
+      return obj;
+    });
+    exportXlsxSheets("shopping_list_"+fromDate+"_to_"+toDate+".xlsx",[{name:"Shopping List",data}]);
   };
 
   const doPrint=()=>{
-    const trows=rows.map(r=>"<tr><td><strong>"+n(r.item)+"</strong></td><td>"+r.total+" "+r.item.unit+"</td><td style='font-size:11px;color:#555'>"+r.byTemple.map(x=>x.name+": "+x.qty).join(", ")+"</td></tr>").join("");
-    printHTML(t("Weekly Shopping List — All Temples","வார கொள்முதல் பட்டியல்"),
-      "<table><thead><tr><th>"+t("Item","பொருள்")+"</th><th>"+t("Weekly Total","வார மொத்தம்")+"</th><th>"+t("By Temple","கோவில் வாரியாக")+"</th></tr></thead><tbody>"+trows+"</tbody></table>");
+    const colHeaders=columns.map(c=>"<th style='text-align:center'>"+c.label+"</th>").join("");
+    const trows=rows.map(r=>{
+      const cells=columns.map(c=>"<td style='text-align:center'>"+(r.byCol[c.key]?"<strong>"+r.byCol[c.key]+"</strong>":"—")+"</td>").join("");
+      return "<tr><td><strong>"+n(r.item)+"</strong></td>"+cells+"<td style='text-align:center;background:#fffbe8'><strong>"+r.total+" "+r.item.unit+"</strong></td></tr>";
+    }).join("");
+    const thead="<thead><tr><th>"+t("Item","பொருள்")+"</th>"+colHeaders+"<th>"+t("Total","மொத்தம்")+"</th></tr></thead>";
+    printHTML(t("Shopping List","கொள்முதல் பட்டியல்")+" ("+fromDate+" – "+toDate+")",
+      "<p style='color:#9B7355;margin:0 0 12px;font-size:12px'>"+t("Range","வரம்பு")+": "+fromDate+" – "+toDate+"</p><table>"+thead+"<tbody>"+trows+"</tbody></table>");
   };
 
   return(
     <div>
       <ReportBar onPrint={hasData?doPrint:null} onExport={hasData?doExport:null} lang={lang} setLang={setLang}>
-        <div style={{fontSize:11,color:P.muted,paddingBottom:6}}>{t("Sums the full weekly recurring schedule across all temples.","அனைத்து கோவில்களின் வார அட்டவணையை கூட்டுகிறது.")}</div>
+        <div>
+          <label style={css.lbl}>{t("From","இருந்து")}</label>
+          <input type="date" style={{...css.inp,width:150}} value={fromDate}
+            onChange={e=>{setFromDate(e.target.value);if(e.target.value>toDate)setToDate(e.target.value);}}/>
+        </div>
+        <div>
+          <label style={css.lbl}>{t("To","வரை")}</label>
+          <input type="date" style={{...css.inp,width:150}} value={toDate}
+            onChange={e=>{setToDate(e.target.value);if(e.target.value<fromDate)setFromDate(e.target.value);}}/>
+        </div>
+        <div style={{fontSize:11,color:P.muted,paddingBottom:6}}>{sortedDates.length} {t("day(s)","நாள்")}</div>
       </ReportBar>
+      <div style={{fontSize:11,color:P.muted,marginBottom:10}}>
+        {t("Combines each temple's recurring weekly schedule with any one-off occasion orders (Moolam, Pradosham, etc.) whose date falls in this range.","கோவில்களின் வார அட்டவணை மற்றும் இந்த வரம்பில் உள்ள சிறப்பு நாள் ஆர்டர்களை (மூலம், பிரதோஷம்) இணைக்கிறது.")}
+      </div>
       {!hasData?(
-        <div style={{color:P.muted,textAlign:"center",padding:32}}>{t("No weekly schedule set up yet.","அட்டவணை இல்லை.")}</div>
+        <div style={{color:P.muted,textAlign:"center",padding:32}}>{t("No items scheduled or ordered in this date range.","இந்த வரம்பில் பொருட்கள் இல்லை.")}</div>
       ):(
-        <div style={{...css.card,padding:0,overflow:"hidden"}}>
+        <div style={{...css.card,padding:0,overflow:"auto"}}>
           <table style={css.table}>
             <thead><tr>
               <th style={css.th}>{t("Item","பொருள்")}</th>
-              <th style={{...css.th,textAlign:"center"}}>{t("Weekly Total","வார மொத்தம்")}</th>
-              <th style={css.th}>{t("By Temple","கோவில் வாரியாக")}</th>
+              {columns.map(c=>(
+                <th key={c.key} style={{...css.th,textAlign:"center",minWidth:100,
+                  background:c.type==="occasion"?P.purple:P.nav}}>{c.label}</th>
+              ))}
+              <th style={{...css.th,background:"#7C4A00",textAlign:"center"}}>{t("All / Total","அனைத்தும்")}</th>
             </tr></thead>
             <tbody>
               {rows.map((r,i)=>(
                 <tr key={r.item.id} style={{background:i%2===0?P.white:P.highlight}}>
                   <td style={css.td}><strong>{n(r.item)}</strong></td>
-                  <td style={{...css.td,textAlign:"center"}}><strong style={{color:P.saffron,fontSize:14}}>{r.total} {r.item.unit}</strong></td>
-                  <td style={css.td}><div style={{display:"flex",flexWrap:"wrap",gap:3}}>{r.byTemple.map((x,j)=><span key={j} style={{...css.badge(P.muted),fontSize:10}}>{x.name}: {x.qty}</span>)}</div></td>
+                  {columns.map(c=>(
+                    <td key={c.key} style={{...css.td,textAlign:"center"}}>
+                      {r.byCol[c.key]?<strong style={{color:c.type==="occasion"?P.purple:P.saffron}}>{r.byCol[c.key]}</strong>:<span style={{color:"#DDD"}}>—</span>}
+                    </td>
+                  ))}
+                  <td style={{...css.td,textAlign:"center",background:"#FFFBE8"}}><strong>{r.total} {r.item.unit}</strong></td>
                 </tr>
               ))}
             </tbody>
