@@ -404,6 +404,7 @@ function App(){
       {id:"rep_ing",en:"Ingredient-wise Dishes",ta:"பொருள் வாரியான உணவு"},
       {id:"rep_shop",en:"Shopping List",ta:"கொள்முதல் பட்டியல்"},
       {id:"rep_del",en:"Delivery Sheet",ta:"விநியோக பட்டியல்"},
+      {id:"rep_menu",en:"Weekly Menu",ta:"வார உணவு பட்டியல்"},
       {id:"rep_col",en:"Location Columnar",ta:"இட நெடுவரிசை"},
       {id:"rep_cost",en:"Cost Analysis",ta:"செலவு பகுப்பாய்வு"},
     ]},
@@ -464,6 +465,7 @@ function App(){
           {page==="rep_ing"&&<RepIng ctx={ctx}/>}
           {page==="rep_shop"&&<RepShop ctx={ctx}/>}
           {page==="rep_del"&&<RepDel ctx={ctx}/>}
+          {page==="rep_menu"&&<RepMenu ctx={ctx}/>}
           {page==="rep_col"&&<RepCol ctx={ctx}/>}
           {page==="rep_cost"&&<RepCost ctx={ctx}/>}
           {page==="inventory"&&<InvPage ctx={ctx}/>}
@@ -1356,6 +1358,9 @@ function OrdersPage({ctx}){
   const tpls=orders.filter(o=>o.isTemplate);
   const [dateQ,setDateQ]=useState("");
   const [nameQ,setNameQ]=useState("");
+  const [dupOpen,setDupOpen]=useState(false);
+  const [dupFrom,setDupFrom]=useState(TODAY);
+  const [dupTo,setDupTo]=useState(TODAY);
 
   const filtReal=[...real]
     .sort((a,b)=>b.date.localeCompare(a.date))
@@ -1371,15 +1376,50 @@ function OrdersPage({ctx}){
     setModal({type:"order",ord:newOrd});
   };
 
+  const duplicateDay=()=>{
+    if(!dupFrom||!dupTo)return;
+    if(dupFrom===dupTo){alert(t("Source and target date are the same.","இருந்து மற்றும் புதிய தேதி ஒன்றே."));return;}
+    const toDup=orders.filter(o=>!o.isTemplate&&o.date===dupFrom);
+    if(!toDup.length){alert(t("No orders found on that date.","அந்த தேதியில் ஆர்டர் இல்லை."));return;}
+    const copies=toDup.map((o,i)=>({
+      ...o,
+      id:Date.now()+i,
+      date:dupTo,
+      entries:(o.entries||[]).map(e=>({...e})),
+    }));
+    setOrders(p=>[...p,...copies]);
+    setDupOpen(false);
+    alert(copies.length+" "+t("order(s) duplicated to","ஆர்டர்(கள்) நகலெடுக்கப்பட்டன")+" "+dupTo);
+  };
+
   return(
     <div>
       <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
         <button style={css.btn()} onClick={()=>setModal({type:"order"})}>+ {t("New Order","புதிய ஆர்டர்")}</button>
         <button style={css.btn("ghost")} onClick={()=>setModal({type:"addLoc"})}>📍 {t("Add Location","இடம் சேர்")}</button>
+        <button style={css.btn(dupOpen?"primary":"ghost")} onClick={()=>setDupOpen(!dupOpen)}>📅 {t("Duplicate Day","நாள் நகலெடு")}</button>
         <input type="date" style={{...css.inp,width:150}} placeholder="Filter by date" value={dateQ} onChange={e=>setDateQ(e.target.value)}/>
         <input style={{...css.inp,maxWidth:200}} placeholder={t("Search order name...","பெயர் தேடு...")} value={nameQ} onChange={e=>setNameQ(e.target.value)}/>
         {(dateQ||nameQ)&&<button style={css.btn("ghost",true)} onClick={()=>{setDateQ("");setNameQ("");}}>✕ Clear</button>}
       </div>
+
+      {dupOpen&&(
+        <div style={{display:"flex",gap:10,alignItems:"flex-end",background:P.highlight,padding:12,borderRadius:8,marginBottom:14,flexWrap:"wrap"}}>
+          <div>
+            <label style={css.lbl}>{t("Copy orders from","இதிலிருந்து நகலெடு")}</label>
+            <input type="date" style={{...css.inp,width:150}} value={dupFrom} onChange={e=>setDupFrom(e.target.value)}/>
+          </div>
+          <div>
+            <label style={css.lbl}>{t("To date","புதிய தேதி")}</label>
+            <input type="date" style={{...css.inp,width:150}} value={dupTo} onChange={e=>setDupTo(e.target.value)}/>
+          </div>
+          <div style={{fontSize:11,color:P.muted,paddingBottom:8}}>
+            {orders.filter(o=>!o.isTemplate&&o.date===dupFrom).length} {t("order(s) found on source date","ஆர்டர்(கள்) கிடைத்தன")}
+          </div>
+          <button style={css.btn("success")} onClick={duplicateDay}>✓ {t("Duplicate","நகலெடு")}</button>
+          <button style={css.btn("ghost")} onClick={()=>setDupOpen(false)}>{t("Cancel","ரத்து")}</button>
+        </div>
+      )}
 
       {tpls.length>0&&(
         <div style={css.card}>
@@ -2186,7 +2226,7 @@ function RepShop({ctx}){
 
     // Collect columns: Name | Unit | date1 | date2... | Total | Available | To Order
     const dateCols=sortedDates;
-    const totalCol=dateCols.length+2; // 1=Name, 2=Unit, then dates, then Total
+    const totalCol=dateCols.length+3; // 1=Name, 2=Unit, then dates, then Total
     const availCol=totalCol+1;
     const orderCol=availCol+1;
 
@@ -2545,6 +2585,138 @@ function RepDel({ctx}){
       })}
       {filtLocs.every(loc=>entries.filter(e=>e.locId===loc.id).length===0)&&(
         <div style={{color:P.muted,textAlign:"center",padding:24}}>{t("No orders for this date / session.","இந்த தேதி / அமர்வுக்கு ஆர்டர் இல்லை.")}</div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// REPORT: WEEKLY MENU (columnar recipe list across a date range)
+// ════════════════════════════════════════════════════════════════════
+function RepMenu({ctx}){
+  const {orders,recipes,lang:gLang}=ctx;
+  const [rLang,setRLang]=useState(gLang);
+  const t=(en,ta)=>rLang==="en"?en:ta;
+  const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
+  const [fromDate,setFromDate]=useState(TODAY);
+  const [toDate,setToDate]=useState(()=>{
+    const d=new Date(TODAY); d.setDate(d.getDate()+6); return d.toISOString().slice(0,10);
+  });
+  const [sessF,setSessF]=useState("All");
+
+  const sortedDates=useMemo(()=>{
+    const dates=[]; const start=new Date(fromDate); const end=new Date(toDate);
+    if(start>end)return[fromDate];
+    const cur=new Date(start);
+    while(cur<=end){dates.push(cur.toISOString().slice(0,10));cur.setDate(cur.getDate()+1);}
+    return dates;
+  },[fromDate,toDate]);
+
+  // Rows keyed by session__recipeId, columns = dates
+  const rows=useMemo(()=>{
+    const map={};
+    sortedDates.forEach(dt=>{
+      const ents=orders.filter(o=>!o.isTemplate&&o.date===dt)
+        .flatMap(o=>o.entries.filter(e=>sessF==="All"||e.session===sessF));
+      ents.forEach(e=>{
+        const rec=recipes.find(r=>r.id===e.recId); if(!rec)return;
+        const key=e.session+"__"+e.recId;
+        if(!map[key])map[key]={session:e.session,rec,byDate:{}};
+        map[key].byDate[dt]=(map[key].byDate[dt]||0)+e.qty;
+      });
+    });
+    return Object.values(map).sort((a,b)=>{
+      const so=SESSIONS.indexOf(a.session)-SESSIONS.indexOf(b.session);
+      if(so!==0)return so;
+      return (rLang==="en"?a.rec.name:a.rec.nameTamil||a.rec.name).localeCompare(rLang==="en"?b.rec.name:b.rec.nameTamil||b.rec.name);
+    });
+  },[sortedDates,orders,recipes,sessF,rLang]);
+
+  const hasData=rows.length>0;
+
+  const doPrint=()=>{
+    const dateHeaders=sortedDates.map(d=>"<th style='text-align:center'>"+d.slice(5)+"</th>").join("");
+    const trows=rows.map(row=>{
+      const cells=sortedDates.map(dt=>{
+        const v=row.byDate[dt];
+        return "<td style='text-align:center'>"+(v?"<strong>"+v+" "+row.rec.yieldUnit+"</strong>":"—")+"</td>";
+      }).join("");
+      return "<tr>"+(sessF==="All"?"<td>"+row.session+"</td>":"")+"<td><strong>"+n(row.rec)+"</strong></td>"+cells+"</tr>";
+    }).join("");
+    const thead="<thead><tr>"+(sessF==="All"?"<th>"+t("Session","அமர்வு")+"</th>":"")+"<th>"+t("Dish","உணவு")+"</th>"+dateHeaders+"</tr></thead>";
+    const sessLabel=sessF==="All"?t("All Sessions","அனைத்து அமர்வு"):sessF;
+    printHTML(t("Weekly Menu","வார உணவு பட்டியல்")+" ("+fromDate+" – "+toDate+")",
+      "<p style='color:#9B7355;margin:0 0 12px;font-size:12px'>"+t("Session","அமர்வு")+": "+sessLabel+" | "+t("Range","வரம்பு")+": "+fromDate+" – "+toDate+"</p>"
+      +"<table>"+thead+"<tbody>"+trows+"</tbody></table>");
+  };
+
+  const doExport=()=>{
+    const data=rows.map(row=>{
+      const obj={};
+      if(sessF==="All")obj[t("Session","அமர்வு")]=row.session;
+      obj[t("Dish","உணவு")]=n(row.rec);
+      sortedDates.forEach(dt=>{obj[dt]=row.byDate[dt]||"";});
+      return obj;
+    });
+    exportXlsxSheets("weekly_menu_"+fromDate+"_to_"+toDate+".xlsx",[{name:"Weekly Menu",data}]);
+  };
+
+  return(
+    <div>
+      <ReportBar onPrint={hasData?doPrint:null} onExport={hasData?doExport:null} lang={rLang} setLang={setRLang}>
+        <div>
+          <label style={css.lbl}>{t("From","இருந்து")}</label>
+          <input type="date" style={{...css.inp,width:148}} value={fromDate}
+            onChange={e=>{setFromDate(e.target.value);if(e.target.value>toDate)setToDate(e.target.value);}}/>
+        </div>
+        <div>
+          <label style={css.lbl}>{t("To","வரை")}</label>
+          <input type="date" style={{...css.inp,width:148}} value={toDate}
+            onChange={e=>{setToDate(e.target.value);if(e.target.value<fromDate)setFromDate(e.target.value);}}/>
+        </div>
+        <div style={{fontSize:11,color:P.muted,paddingBottom:6}}>
+          {sortedDates.length} {t("day(s)","நாள்")}
+        </div>
+      </ReportBar>
+
+      <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+        {["All",...SESSIONS].map(s=>(
+          <button key={s} style={{...css.btn(sessF===s?"primary":"ghost",true),
+            borderColor:s!=="All"?(SCOLOR[s]||P.muted):"#DCC88A",
+            color:sessF===s?"white":(s!=="All"?SCOLOR[s]:P.deepBrown),
+            background:sessF===s?(SCOLOR[s]||P.saffron):"transparent",
+          }} onClick={()=>setSessF(s)}>{s==="All"?t("All Sessions","அனைத்து அமர்வு"):s}</button>
+        ))}
+      </div>
+
+      {!hasData?(
+        <div style={{color:P.muted,textAlign:"center",padding:32}}>{t("No orders in this date range.","இந்த தேதி வரம்பில் ஆர்டர் இல்லை.")}</div>
+      ):(
+        <div style={{...css.card,padding:0,overflow:"auto"}}>
+          <table style={css.table}>
+            <thead><tr>
+              {sessF==="All"&&<th style={css.th}>{t("Session","அமர்வு")}</th>}
+              <th style={css.th}>{t("Dish","உணவு")}</th>
+              {sortedDates.map(dt=><th key={dt} style={{...css.th,textAlign:"center",minWidth:80}}>{dt.slice(5)}</th>)}
+            </tr></thead>
+            <tbody>
+              {rows.map((row,i)=>(
+                <tr key={row.session+"_"+row.rec.id} style={{background:i%2===0?P.white:P.highlight}}>
+                  {sessF==="All"&&<td style={css.td}><span style={css.badge(SCOLOR[row.session]||P.muted)}>{row.session}</span></td>}
+                  <td style={css.td}><strong>{n(row.rec)}</strong></td>
+                  {sortedDates.map(dt=>{
+                    const v=row.byDate[dt];
+                    return(
+                      <td key={dt} style={{...css.td,textAlign:"center"}}>
+                        {v?<strong style={{color:P.saffron}}>{v} {row.rec.yieldUnit}</strong>:<span style={{color:"#DDD"}}>—</span>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
