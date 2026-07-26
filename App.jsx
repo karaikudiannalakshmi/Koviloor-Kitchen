@@ -206,6 +206,23 @@ function applyScaling(baseQty,multiplier,factor,benchmark){
   return benchmark+(linear-benchmark)*factor;
 }
 
+// ── Simple Levenshtein distance, used for duplicate-ingredient-name detection ──
+function levenshtein(a,b){
+  a=(a||"").toLowerCase(); b=(b||"").toLowerCase();
+  const m=a.length,n=b.length;
+  if(!m)return n; if(!n)return m;
+  const dp=[];
+  for(let i=0;i<=m;i++)dp.push(new Array(n+1).fill(0));
+  for(let i=0;i<=m;i++)dp[i][0]=i;
+  for(let j=0;j<=n;j++)dp[0][j]=j;
+  for(let i=1;i<=m;i++){
+    for(let j=1;j<=n;j++){
+      dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j-1],dp[i-1][j],dp[i][j-1]);
+    }
+  }
+  return dp[m][n];
+}
+
 const TODAY=new Date().toISOString().slice(0,10);
 
 // ── Print utility ──────────────────────────────────────────────────────────────
@@ -408,6 +425,7 @@ function App(){
       {id:"rep_menu",en:"Weekly Menu",ta:"வார உணவு பட்டியல்"},
       {id:"rep_col",en:"Location Columnar",ta:"இட நெடுவரிசை"},
       {id:"rep_cost",en:"Cost Analysis",ta:"செலவு பகுப்பாய்வு"},
+      {id:"rep_compare",en:"Compare Recipes",ta:"சமையல் ஒப்பீடு"},
     ]},
     {id:"inventory",icon:"📦",en:"Inventory",ta:"சரக்கு மேலாண்மை"},
     {id:"pooja",icon:"🪔",en:"Pooja Material",ta:"பூஜை பொருள்",children:[
@@ -476,6 +494,7 @@ function App(){
           {page==="rep_menu"&&<RepMenu ctx={ctx}/>}
           {page==="rep_col"&&<RepCol ctx={ctx}/>}
           {page==="rep_cost"&&<RepCost ctx={ctx}/>}
+          {page==="rep_compare"&&<RepCompare ctx={ctx}/>}
           {page==="inventory"&&<InvPage ctx={ctx}/>}
           {page==="pooja_items"&&<PoojaItemsPage ctx={ctx}/>}
           {page==="pooja_temples"&&<PoojaTemplesPage ctx={ctx}/>}
@@ -499,6 +518,8 @@ function App(){
             {modal.type==="postIssues"&&<PostIssues ctx={ctx} date={modal.date} onClose={()=>setModal(null)}/>}
             {modal.type==="addLoc"&&<LocForm ctx={ctx} onClose={()=>setModal(null)}/>}
             {modal.type==="recipeTypes"&&<RecipeTypesManager ctx={ctx} onClose={()=>setModal(null)}/>}
+            {modal.type==="ingUsage"&&<IngUsageModal ctx={ctx} ing={modal.ing} onClose={()=>setModal(null)}/>}
+            {modal.type==="ingSubstitute"&&<IngSubstituteModal ctx={ctx} onClose={()=>setModal(null)}/>}
           </div>
         </div>
       )}
@@ -510,7 +531,7 @@ function App(){
 // INGREDIENTS
 // ════════════════════════════════════════════════════════════════════
 function IngsPage({ctx}){
-  const {ingredients,setIngredients,lang}=ctx;
+  const {ingredients,setIngredients,recipes,setRecipes,lang,setModal}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
   const [cat,setCat]=useState("all");
   const [editId,setEditId]=useState(null);
@@ -521,6 +542,49 @@ function IngsPage({ctx}){
   const [translating,setTranslating]=useState(false);
   const [transProgress,setTransProgress]=useState("");
   const recFileRef=useRef();
+  const [showDupes,setShowDupes]=useState(false);
+
+  // ── Duplicate-name detection ────────────────────────────────────────────
+  const normalizeName=s=>(s||"").toLowerCase().trim().replace(/[^a-z0-9]/g,"");
+  const dupGroups=useMemo(()=>{
+    const groups=[]; const used=new Set();
+    for(let i=0;i<ingredients.length;i++){
+      if(used.has(ingredients[i].id))continue;
+      const group=[ingredients[i]];
+      const a=normalizeName(ingredients[i].name);
+      for(let j=i+1;j<ingredients.length;j++){
+        if(used.has(ingredients[j].id))continue;
+        const b=normalizeName(ingredients[j].name);
+        const dist=levenshtein(a,b);
+        const closeEnough=(a===b&&a.length>0)||(Math.min(a.length,b.length)>=4&&dist<=2);
+        if(closeEnough){group.push(ingredients[j]);used.add(ingredients[j].id);}
+      }
+      if(group.length>1){groups.push(group);used.add(ingredients[i].id);}
+    }
+    return groups;
+  },[ingredients]);
+
+  const mergeGroup=(keepId,group)=>{
+    const removeIds=group.filter(g=>g.id!==keepId).map(g=>g.id);
+    if(!removeIds.length)return;
+    if(!confirm(t("Merge duplicate(s) into the selected ingredient? This updates every recipe that uses them.","நகல்களை ஒன்றிணைக்கவா? இது அனைத்து சமையல்களையும் புதுப்பிக்கும்.")))return;
+    setRecipes(prev=>prev.map(rec=>{
+      let ings=[...(rec.ingredients||[])];
+      let changed=false;
+      removeIds.forEach(rid=>{
+        const idx=ings.findIndex(x=>x.iid===rid);
+        if(idx<0)return;
+        changed=true;
+        const moved=ings[idx];
+        ings=ings.filter(x=>x.iid!==rid);
+        const keepIdx=ings.findIndex(x=>x.iid===keepId);
+        if(keepIdx>=0)ings[keepIdx]={...ings[keepIdx],qty:+(ings[keepIdx].qty+moved.qty).toFixed(4)};
+        else ings.push({...moved,iid:keepId});
+      });
+      return changed?{...rec,ingredients:ings}:rec;
+    }));
+    setIngredients(prev=>prev.filter(x=>!removeIds.includes(x.id)));
+  };
 
   const translateToTamil=async()=>{
     const needTranslation=ingredients.filter(x=>!x.nameTamil||!x.nameTamil.trim());
@@ -630,7 +694,15 @@ function IngsPage({ctx}){
             {f==="all"?t("All","அனைத்தும்"):f==="cut"?"✂️ "+t("Cut Veg","நறுக்கிய காய்"):f.charAt(0).toUpperCase()+f.slice(1)}
           </button>
         ))}
-        <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+        <div style={{marginLeft:"auto",display:"flex",gap:6,flexWrap:"wrap"}}>
+          <button style={{...css.btn(showDupes?"primary":"ghost",true),
+            borderColor:dupGroups.length?P.danger:"#DCC88A",color:showDupes?undefined:(dupGroups.length?P.danger:P.deepBrown)}}
+            onClick={()=>setShowDupes(!showDupes)}>
+            ⚠️ {t("Check Duplicates","நகல் சரிபார்")}{dupGroups.length>0?" ("+dupGroups.length+")":""}
+          </button>
+          <button style={{...css.btn("ghost",true),borderColor:P.info,color:P.info}} onClick={()=>setModal({type:"ingSubstitute"})}>
+            🔄 {t("Substitute Ingredient","பொருள் மாற்று")}
+          </button>
           <button style={css.btn("ghost",true)} onClick={exportIngredients}>⬇️ {t("Export Excel","Excel ஏற்று")}</button>
           <button style={css.btn("ghost",true)} onClick={dlTemplate}>📋 {t("Template","டெம்ப்ளேட்")}</button>
           <button style={css.btn("success",true)} onClick={()=>fRef.current.click()}>📤 {t("Import Excel","Excel இறக்கு")}</button>
@@ -641,6 +713,20 @@ function IngsPage({ctx}){
           </button>
         </div>
       </div>
+
+      {showDupes&&(
+        <div style={{...css.card,background:"#FFF3CD",border:"1px solid #F59E0B"}}>
+          <div style={{fontWeight:700,color:"#92400E",marginBottom:8}}>
+            ⚠️ {t("Possible Duplicate Names","சாத்தியமான நகல் பெயர்கள்")} ({dupGroups.length})
+          </div>
+          <div style={{fontSize:11,color:"#7C4A00",marginBottom:10}}>
+            {t("Grouped by near-identical names (spacing, case, small typos). Pick which one to keep — the others get merged into it across every recipe, then removed.","ஒத்த பெயர்கள் தொகுக்கப்பட்டுள்ளன. வைத்திருக்க வேண்டியதைத் தேர்ந்தெடுக்கவும்.")}
+          </div>
+          {!dupGroups.length?(
+            <div style={{color:P.success,fontSize:12}}>✅ {t("No likely duplicates found.","நகல்கள் இல்லை.")}</div>
+          ):dupGroups.map((group,gi)=><DupGroupRow key={gi} group={group} lang={lang} mergeGroup={mergeGroup}/>)}
+        </div>
+      )}
 
       <div style={{...css.card,padding:0,overflow:"auto"}}>
         <table style={css.table}>
@@ -663,7 +749,7 @@ function IngsPage({ctx}){
                   <td style={css.td}>{ed?<input type="number" style={{...css.inp,width:80}} value={ef.scalingBenchmark||""} onChange={e=>setEf({...ef,scalingBenchmark:e.target.value})}/>:(ing.scalingBenchmark?`${ing.scalingBenchmark}${ing.unit}`:<span style={{color:"#CCC"}}>—</span>)}</td>
                   <td style={css.td}><div style={{display:"flex",gap:4}}>
                     {ed?<><button style={css.btn("success",true)} onClick={saveEdit}>✓</button><button style={css.btn("ghost",true)} onClick={()=>setEditId(null)}>✕</button></>
-                    :<><button style={css.btn("ghost",true)} onClick={()=>{setEditId(ing.id);setEf({...ing});}}>✏️</button><button style={css.btn("danger",true)} onClick={()=>setIngredients(p=>p.filter(x=>x.id!==ing.id))}>🗑</button></>}
+                    :<><button style={css.btn("info",true)} title={t("Where is this used?","எங்கு பயன்படுத்தப்படுகிறது?")} onClick={()=>setModal({type:"ingUsage",ing})}>👁</button><button style={css.btn("ghost",true)} onClick={()=>{setEditId(ing.id);setEf({...ing});}}>✏️</button><button style={css.btn("danger",true)} onClick={()=>setIngredients(p=>p.filter(x=>x.id!==ing.id))}>🗑</button></>}
                   </div></td>
                 </tr>
               );
@@ -686,6 +772,207 @@ function IngsPage({ctx}){
       <div style={{fontSize:11,color:P.muted,marginTop:6}}>
         💡 {t("Scaling Factor < 1 = sub-linear. Benchmark = qty above which sub-linear kicks in. E.g. Salt factor 0.75, benchmark 200g: first 200g scales linearly, excess × 0.75.","காரணி < 1 = குறைந்த விகிதம். வரம்பு அளவுக்கு மேல் காரணி பயன்படும்.")}
       </div>
+    </div>
+  );
+}
+
+// ── Duplicate-name group row (radio-select which to keep, then merge) ──────
+function DupGroupRow({group,lang,mergeGroup}){
+  const t=(en,ta)=>lang==="en"?en:ta;
+  const [keepId,setKeepId]=useState(group[0].id);
+  const groupKey=group.map(x=>x.id).join("_");
+  return(
+    <div style={{background:"white",borderRadius:7,padding:10,marginBottom:8,border:"1px solid #F5D76E"}}>
+      <div style={{display:"flex",gap:14,flexWrap:"wrap",alignItems:"center"}}>
+        {group.map(g=>(
+          <label key={g.id} style={{display:"flex",alignItems:"center",gap:5,fontSize:12,cursor:"pointer"}}>
+            <input type="radio" name={"grp"+groupKey} checked={keepId===g.id} onChange={()=>setKeepId(g.id)}/>
+            <strong>{g.name}</strong>
+            <span style={{color:P.muted}}>({g.unit}{g.nameTamil?", "+g.nameTamil:""})</span>
+          </label>
+        ))}
+        <button style={{...css.btn("success",true),marginLeft:"auto"}} onClick={()=>mergeGroup(keepId,group)}>
+          ✓ {t("Merge → keep selected","இணை")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Ingredient usage viewer: "which recipes use this ingredient?" ──────────
+function IngUsageModal({ctx,ing,onClose}){
+  const {recipes,ingredients,lang,setModal}=ctx;
+  const t=(en,ta)=>lang==="en"?en:ta;
+  const n=(x)=>lang==="en"?x.name:(x.nameTamil||x.name);
+
+  const rows=recipes.map(rec=>{
+    const entries=(rec.ingredients||[]).filter(x=>x.iid===ing.id);
+    if(!entries.length)return null;
+    const qty=entries.reduce((s,e)=>s+e.qty,0);
+    const unit=entries[0].unit;
+    const lineCost=(ing.normCost||0)*qty;
+    const totalCost=computeRecipeCost(rec,1,recipes,ingredients);
+    const pct=totalCost>0?(lineCost/totalCost*100):0;
+    return{rec,qty,unit,lineCost,pct};
+  }).filter(Boolean).sort((a,b)=>b.lineCost-a.lineCost);
+
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:P.deepBrown}}>
+          👁 {n(ing)} — {t("Used In","பயன்படுத்தப்படும் சமையல்கள்")}
+        </div>
+        <button style={css.btn("ghost",true)} onClick={onClose}>✕</button>
+      </div>
+      {ing.normCost?(
+        <div style={{fontSize:12,color:P.muted,marginBottom:12}}>
+          {t("Norm cost","நிலையான விலை")}: <strong style={{color:P.success}}>₹{ing.normCost}/{ing.unit}</strong>
+          <span style={{marginLeft:10}}>{t("If this ingredient's price changes, the affected cost is the Line Cost column below, per recipe batch.","இந்த பொருளின் விலை மாறினால், கீழே உள்ள செலவு பாதிக்கப்படும்.")}</span>
+        </div>
+      ):null}
+      {!rows.length?(
+        <div style={{color:P.muted,textAlign:"center",padding:24}}>{t("Not used in any recipe yet.","எந்த சமையலிலும் பயன்படவில்லை.")}</div>
+      ):(
+        <table style={css.table}>
+          <thead><tr>
+            <th style={css.th}>{t("Recipe","சமையல்")}</th>
+            <th style={{...css.th,textAlign:"right"}}>{t("Qty (per batch)","அளவு")}</th>
+            <th style={{...css.th,textAlign:"right"}}>{t("Line Cost","செலவு")}</th>
+            <th style={{...css.th,textAlign:"right"}}>% {t("of recipe cost","சமையல் செலவில்")}</th>
+            <th style={css.th}></th>
+          </tr></thead>
+          <tbody>{rows.map((row,i)=>(
+            <tr key={row.rec.id} style={{background:i%2===0?P.white:P.highlight}}>
+              <td style={css.td}><strong>{n(row.rec)}</strong></td>
+              <td style={{...css.td,textAlign:"right"}}>{row.qty} {row.unit}</td>
+              <td style={{...css.td,textAlign:"right"}}>{row.lineCost>0?<strong style={{color:P.success}}>₹{row.lineCost.toFixed(2)}</strong>:<span style={{color:"#CCC"}}>—</span>}</td>
+              <td style={{...css.td,textAlign:"right",fontSize:11,color:P.muted}}>{row.pct>0?row.pct.toFixed(1)+"%":"—"}</td>
+              <td style={css.td}><button style={css.btn("ghost",true)} onClick={()=>{onClose();setTimeout(()=>setModal({type:"recDetail",rec:row.rec}),50);}}>{t("Open","திற")}</button></td>
+            </tr>
+          ))}</tbody>
+        </table>
+      )}
+      <div style={{fontSize:11,color:P.muted,marginTop:10}}>
+        {rows.length} {t("recipe(s) use this ingredient.","சமையல்கள் இந்த பொருளை பயன்படுத்துகின்றன.")}
+      </div>
+    </div>
+  );
+}
+
+// ── Substitute one ingredient for another across every recipe ──────────────
+function IngSubstituteModal({ctx,onClose}){
+  const {ingredients,recipes,setRecipes,lang}=ctx;
+  const t=(en,ta)=>lang==="en"?en:ta;
+  const n=(x)=>lang==="en"?x.name:(x.nameTamil||x.name);
+  const [srcId,setSrcId]=useState("");
+  const [tgtId,setTgtId]=useState("");
+  const [rate,setRate]=useState("1");
+  const [preview,setPreview]=useState(null);
+
+  const src=srcId?ingredients.find(x=>x.id===+srcId):null;
+  const tgt=tgtId?ingredients.find(x=>x.id===+tgtId):null;
+
+  const doPreview=()=>{
+    if(!src||!tgt||!rate)return;
+    const r=+rate;
+    const affected=recipes.filter(rec=>(rec.ingredients||[]).some(x=>x.iid===src.id));
+    const rows=affected.map(rec=>{
+      const entry=rec.ingredients.find(x=>x.iid===src.id);
+      const existingTgt=rec.ingredients.find(x=>x.iid===tgt.id);
+      const newQty=+(entry.qty*r).toFixed(4);
+      return{rec,oldQty:entry.qty,oldUnit:entry.unit,newQty,
+        willMerge:!!existingTgt,mergedQty:existingTgt?+(existingTgt.qty+newQty).toFixed(4):newQty};
+    });
+    setPreview(rows);
+  };
+
+  const apply=()=>{
+    if(!preview||!preview.length)return;
+    setRecipes(prev=>prev.map(rec=>{
+      const row=preview.find(x=>x.rec.id===rec.id);
+      if(!row)return rec;
+      let ings=(rec.ingredients||[]).filter(x=>x.iid!==src.id);
+      const existingIdx=ings.findIndex(x=>x.iid===tgt.id);
+      if(existingIdx>=0)ings[existingIdx]={...ings[existingIdx],qty:row.mergedQty};
+      else ings.push({iid:tgt.id,qty:row.newQty,unit:tgt.unit});
+      return{...rec,ingredients:ings};
+    }));
+    alert(preview.length+" "+t("recipe(s) updated.","சமையல்கள் புதுப்பிக்கப்பட்டன."));
+    onClose();
+  };
+
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:P.deepBrown}}>
+          🔄 {t("Substitute Ingredient","பொருள் மாற்று")}
+        </div>
+        <button style={css.btn("ghost",true)} onClick={onClose}>✕</button>
+      </div>
+      <div style={{fontSize:11,color:P.muted,marginBottom:12}}>
+        {t("Replace one ingredient with another across every recipe that uses it, scaling quantity by a conversion rate. E.g. 1 kg Tomato → 0.2 kg Tomato Paste means rate = 0.2.","ஒரு பொருளை மற்றொன்றால் மாற்றவும், மாற்று விகிதப்படி அளவு மாற்றப்படும்.")}
+      </div>
+      <div style={css.g2}>
+        <div>
+          <label style={css.lbl}>{t("Replace this ingredient","இந்த பொருளை மாற்று")}</label>
+          <select style={{...css.sel,width:"100%"}} value={srcId} onChange={e=>{setSrcId(e.target.value);setPreview(null);}}>
+            <option value="">{t("Select...","தேர்வு...")}</option>
+            {ingredients.map(i=><option key={i.id} value={i.id}>{n(i)} ({i.unit})</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={css.lbl}>{t("With this ingredient","இதனுடன்")}</label>
+          <select style={{...css.sel,width:"100%"}} value={tgtId} onChange={e=>{setTgtId(e.target.value);setPreview(null);}}>
+            <option value="">{t("Select...","தேர்வு...")}</option>
+            {ingredients.filter(i=>i.id!==+srcId).map(i=><option key={i.id} value={i.id}>{n(i)} ({i.unit})</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{marginTop:10}}>
+        <label style={css.lbl}>{t("Conversion Rate","மாற்று விகிதம்")}</label>
+        <input type="number" step="0.01" min="0" style={{...css.inp,width:120}} value={rate}
+          onChange={e=>{setRate(e.target.value);setPreview(null);}} placeholder="e.g. 0.2"/>
+        {src&&tgt&&<div style={{fontSize:11,color:P.muted,marginTop:4}}>
+          1 {src.unit} {n(src)} = {rate||"?"} {tgt.unit} {n(tgt)}
+        </div>}
+      </div>
+      <div style={{display:"flex",justifyContent:"flex-end",marginTop:12}}>
+        <button style={css.btn("info")} onClick={doPreview} disabled={!src||!tgt||!rate}>{t("Preview","முன்னோட்டம்")}</button>
+      </div>
+
+      {preview&&(
+        <div style={{marginTop:16}}>
+          <div style={css.sHead}>{t("Affected Recipes","பாதிக்கப்பட்ட சமையல்கள்")} ({preview.length})</div>
+          {!preview.length?(
+            <div style={{color:P.muted,textAlign:"center",padding:16}}>{t("No recipes use this ingredient.","இந்த பொருள் எந்த சமையலிலும் இல்லை.")}</div>
+          ):(
+            <table style={css.table}>
+              <thead><tr>
+                <th style={css.th}>{t("Recipe","சமையல்")}</th>
+                <th style={css.th}>{t("Old","பழையது")}</th>
+                <th style={css.th}>{t("New","புதியது")}</th>
+                <th style={css.th}></th>
+              </tr></thead>
+              <tbody>{preview.map((row,i)=>(
+                <tr key={row.rec.id} style={{background:i%2===0?P.white:P.highlight}}>
+                  <td style={css.td}><strong>{n(row.rec)}</strong></td>
+                  <td style={css.td}>{row.oldQty} {row.oldUnit} {n(src)}</td>
+                  <td style={css.td}><strong style={{color:P.success}}>{row.willMerge?row.mergedQty:row.newQty} {tgt.unit} {n(tgt)}</strong></td>
+                  <td style={css.td}>{row.willMerge&&<span style={{...css.badge(P.info),fontSize:10}}>{t("merges with existing","ஏற்கனவே உள்ளதுடன் இணையும்")}</span>}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          )}
+          {preview.length>0&&(
+            <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:14}}>
+              <button style={css.btn("ghost")} onClick={onClose}>{t("Cancel","ரத்து")}</button>
+              <button style={css.btn("danger")} onClick={()=>{if(confirm(t("This will update all listed recipes. Continue?","இதை உறுதிப்படுத்தவா?")))apply();}}>
+                ✓ {t("Apply Substitution","மாற்றை செயல்படுத்து")}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -771,6 +1058,18 @@ function RecsPage({ctx}){
     const qq=q.toLowerCase();
     return !qq||r.name.toLowerCase().includes(qq)||(r.nameTamil||"").toLowerCase().includes(qq);
   };
+  const duplicateRecipe=(rec)=>{
+    const copy={
+      ...rec,
+      id:Date.now(),
+      name:rec.name+" (Copy)",
+      nameTamil:rec.nameTamil?rec.nameTamil+" (நகல்)":rec.nameTamil,
+      ingredients:(rec.ingredients||[]).map(i=>({...i})),
+      subLinks:(rec.subLinks||[]).map(s=>({...s})),
+      prepSteps:(rec.prepSteps||[]).map(s=>({...s})),
+    };
+    setRecipes(p=>[...p,copy]);
+  };
   const mainRecs=recipes.filter(r=>!r.isSubRecipe).filter(filterFn);
   const subRecs=recipes.filter(r=>r.isSubRecipe).filter(filterFn);
   const usedTypes=[...new Set(recipes.map(r=>r.recipeType).filter(Boolean))];
@@ -851,6 +1150,7 @@ function RecsPage({ctx}){
                 <td style={css.td}>
                   <div style={{display:"flex",gap:4}}>
                     <button style={css.btn("ghost",true)} title="Edit" onClick={()=>setModal({type:"recipe",rec:r})}>✏️</button>
+                    <button style={css.btn("info",true)} title={t("Duplicate","நகலெடு")} onClick={()=>duplicateRecipe(r)}>📋</button>
                     <button style={css.btn("danger",true)} title="Delete" onClick={()=>setRecipes(p=>p.filter(x=>x.id!==r.id))}>🗑</button>
                   </div>
                 </td>
@@ -3041,6 +3341,168 @@ function RepCost({ctx}){
 }
 
 // ════════════════════════════════════════════════════════════════════
+// REPORT: COMPARE RECIPES (columnar, normalized to same output qty)
+// ════════════════════════════════════════════════════════════════════
+function RepCompare({ctx}){
+  const {recipes,ingredients,lang:gLang}=ctx;
+  const [rLang,setRLang]=useState(gLang);
+  const t=(en,ta)=>rLang==="en"?en:ta;
+  const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
+  const [selectedIds,setSelectedIds]=useState([]);
+  const [addId,setAddId]=useState("");
+  const [targetQty,setTargetQty]=useState(1);
+
+  const selected=selectedIds.map(id=>recipes.find(r=>r.id===id)).filter(Boolean);
+  const round2=v=>Math.round((+v||0)*100)/100;
+
+  const addRecipe=()=>{
+    if(!addId)return;
+    const id=+addId;
+    if(!selectedIds.includes(id))setSelectedIds(p=>[...p,id]);
+    setAddId("");
+  };
+  const removeRecipe=id=>setSelectedIds(p=>p.filter(x=>x!==id));
+
+  const costPerRecipe=rec=>{
+    const mult=rec.yield?(targetQty/rec.yield):1;
+    return computeRecipeCost(rec,mult,recipes,ingredients);
+  };
+
+  const rows=useMemo(()=>{
+    const byIng={};
+    selected.forEach(rec=>{
+      const mult=rec.yield?(targetQty/rec.yield):1;
+      const expanded=mergeIngs(expandRecipeIngs(rec,mult,recipes,ingredients,true));
+      expanded.forEach(row=>{
+        if(!byIng[row.d.id])byIng[row.d.id]={ing:row.d,perRecipe:{}};
+        byIng[row.d.id].perRecipe[rec.id]=(byIng[row.d.id].perRecipe[rec.id]||0)+row.qty;
+      });
+    });
+    return Object.values(byIng).sort((a,b)=>n(a.ing).localeCompare(n(b.ing)));
+  },[selected,targetQty,recipes,ingredients,rLang]);
+
+  const doExport=()=>{
+    const data=rows.map(row=>{
+      const obj={[t("Ingredient","பொருள்")]:n(row.ing),[t("Unit","அலகு")]:row.ing.unit};
+      selected.forEach(rec=>{obj[n(rec)]=row.perRecipe[rec.id]?round2(row.perRecipe[rec.id]):"";});
+      return obj;
+    });
+    if(selected.length){
+      const costRow={[t("Ingredient","பொருள்")]:t("— Total Cost —","— மொத்த செலவு —"),[t("Unit","அலகு")]:""};
+      selected.forEach(rec=>{costRow[n(rec)]=round2(costPerRecipe(rec));});
+      data.push(costRow);
+    }
+    exportXlsxSheets("recipe_comparison.xlsx",[{name:"Comparison",data}]);
+  };
+
+  const doPrint=()=>{
+    const headers=selected.map(rec=>"<th style='text-align:center'>"+n(rec)+"<br><span style='font-weight:400;font-size:10px'>"+t("per","")+" "+targetQty+" "+rec.yieldUnit+"</span></th>").join("");
+    const trows=rows.map(row=>{
+      const vals=selected.map(rec=>row.perRecipe[rec.id]||0);
+      const max=Math.max(...vals);
+      const maxCount=vals.filter(v=>v===max).length;
+      const cells=selected.map(rec=>{
+        const v=row.perRecipe[rec.id]||0;
+        const isMax=v===max&&max>0&&maxCount===1;
+        return "<td style='text-align:center"+(isMax?";font-weight:800;color:#C0392B":"")+"'>"+(v?round2(v):"—")+"</td>";
+      }).join("");
+      return "<tr><td><strong>"+n(row.ing)+"</strong></td>"+cells+"</tr>";
+    }).join("");
+    const costCells=selected.map(rec=>"<td style='text-align:center;font-weight:700'>₹"+round2(costPerRecipe(rec))+"</td>").join("");
+    printHTML(t("Recipe Comparison","சமையல் ஒப்பீடு"),
+      "<table><thead><tr><th>"+t("Ingredient","பொருள்")+"</th>"+headers+"</tr></thead><tbody>"+trows+
+      "<tr style='background:#FFF3CD'><td><strong>"+t("Total Cost","மொத்த செலவு")+"</strong></td>"+costCells+"</tr></tbody></table>");
+  };
+
+  return(
+    <div>
+      <ReportBar onPrint={selected.length>0?doPrint:null} onExport={selected.length>0?doExport:null} lang={rLang} setLang={setRLang}>
+        <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
+          <div>
+            <label style={css.lbl}>{t("Add Recipe","சமையல் சேர்")}</label>
+            <select style={{...css.sel,minWidth:220}} value={addId} onChange={e=>setAddId(e.target.value)}>
+              <option value="">{t("Select recipe...","தேர்வு...")}</option>
+              {recipes.filter(r=>!selectedIds.includes(r.id)).map(r=><option key={r.id} value={r.id}>{n(r)}</option>)}
+            </select>
+          </div>
+          <button style={css.btn()} onClick={addRecipe} disabled={!addId}>+ {t("Add","சேர்")}</button>
+          <div>
+            <label style={css.lbl}>{t("Normalize to output qty","இயல் அளவுக்கு மாற்று")}</label>
+            <input type="number" min="0.1" step="0.1" style={{...css.inp,width:100}} value={targetQty} onChange={e=>setTargetQty(+e.target.value||1)}/>
+          </div>
+        </div>
+      </ReportBar>
+
+      <div style={{fontSize:11,color:P.muted,marginBottom:10}}>
+        {t("Each recipe is scaled to the quantity above, in its own yield unit, so ingredient amounts become directly comparable regardless of original batch size.","ஒவ்வொரு சமையலும் மேலே உள்ள அளவுக்கு மாற்றப்பட்டு ஒப்பிடப்படுகிறது.")}
+      </div>
+
+      {selected.length>0&&(
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+          {selected.map(rec=>(
+            <span key={rec.id} style={{...css.badge(P.saffron),display:"flex",alignItems:"center",gap:6,fontSize:12,padding:"5px 10px"}}>
+              {n(rec)} ({targetQty} {rec.yieldUnit})
+              <span style={{cursor:"pointer",fontWeight:700}} onClick={()=>removeRecipe(rec.id)}>✕</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {selected.length<2?(
+        <div style={{color:P.muted,textAlign:"center",padding:32}}>{t("Add at least 2 recipes to compare.","ஒப்பிட 2 சமையல்களையாவது சேர்க்கவும்.")}</div>
+      ):(
+        <div style={{...css.card,padding:0,overflow:"auto"}}>
+          <table style={css.table}>
+            <thead><tr>
+              <th style={css.th}>{t("Ingredient","பொருள்")}</th>
+              {selected.map(rec=>(
+                <th key={rec.id} style={{...css.th,textAlign:"center",minWidth:110}}>
+                  {n(rec)}<div style={{fontWeight:400,fontSize:10,opacity:0.8}}>{t("per","")} {targetQty} {rec.yieldUnit}</div>
+                </th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {rows.map((row,i)=>{
+                const vals=selected.map(rec=>row.perRecipe[rec.id]||0);
+                const max=Math.max(...vals);
+                const maxCount=vals.filter(v=>v===max).length;
+                return(
+                  <tr key={row.ing.id} style={{background:i%2===0?P.white:P.highlight}}>
+                    <td style={css.td}><strong>{n(row.ing)}</strong> <span style={{fontSize:10,color:P.muted}}>({row.ing.unit})</span></td>
+                    {selected.map(rec=>{
+                      const v=row.perRecipe[rec.id]||0;
+                      const isMax=v===max&&max>0&&maxCount===1;
+                      return(
+                        <td key={rec.id} style={{...css.td,textAlign:"center"}}>
+                          {v?<strong style={{color:isMax?P.danger:P.deepBrown}}>{round2(v)}</strong>:<span style={{color:"#DDD"}}>—</span>}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+              <tr style={{background:"#FFF3CD"}}>
+                <td style={css.td}><strong>{t("Total Cost","மொத்த செலவு")}</strong></td>
+                {selected.map(rec=>(
+                  <td key={rec.id} style={{...css.td,textAlign:"center"}}>
+                    <strong style={{color:P.success}}>₹{round2(costPerRecipe(rec))}</strong>
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+      {selected.length>=2&&(
+        <div style={{fontSize:11,color:P.muted,marginTop:8}}>
+          {t("Red bold values mark the recipe using the most of that ingredient, per the same normalized output quantity — useful for spotting e.g. which kuzhambu uses the most chilli powder.","சிவப்பு நிற எண்கள் அதிக பயன்பாட்டைக் காட்டுகின்றன.")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
 // INVENTORY
 // ════════════════════════════════════════════════════════════════════
 // ════════════════════════════════════════════════════════════════════
@@ -3801,12 +4263,13 @@ function PoojaWeeklyShopPage({ctx}){
   },[sortedDates,poojaTemples,poojaItems,occOrders,lang]);
 
   const hasData=rows.length>0;
+  const round2=v=>Math.round((+v||0)*100)/100;
 
   const doExport=()=>{
     const data=rows.map(r=>{
       const obj={[t("Item","பொருள்")]:n(r.item),[t("Unit","அலகு")]:r.item.unit};
-      columns.forEach(c=>{obj[c.label]=r.byCol[c.key]||"";});
-      obj[t("Total","மொத்தம்")]=r.total;
+      columns.forEach(c=>{obj[c.label]=r.byCol[c.key]?round2(r.byCol[c.key]):"";});
+      obj[t("Total","மொத்தம்")]=round2(r.total);
       return obj;
     });
     exportXlsxSheets("shopping_list_"+fromDate+"_to_"+toDate+".xlsx",[{name:"Shopping List",data}]);
@@ -3815,8 +4278,8 @@ function PoojaWeeklyShopPage({ctx}){
   const doPrint=()=>{
     const colHeaders=columns.map(c=>"<th style='text-align:center'>"+c.label+"</th>").join("");
     const trows=rows.map(r=>{
-      const cells=columns.map(c=>"<td style='text-align:center'>"+(r.byCol[c.key]?"<strong>"+r.byCol[c.key]+"</strong>":"—")+"</td>").join("");
-      return "<tr><td><strong>"+n(r.item)+"</strong></td>"+cells+"<td style='text-align:center;background:#fffbe8'><strong>"+r.total+" "+r.item.unit+"</strong></td></tr>";
+      const cells=columns.map(c=>"<td style='text-align:center'>"+(r.byCol[c.key]?"<strong>"+round2(r.byCol[c.key])+"</strong>":"—")+"</td>").join("");
+      return "<tr><td><strong>"+n(r.item)+"</strong></td>"+cells+"<td style='text-align:center;background:#fffbe8'><strong>"+round2(r.total)+" "+r.item.unit+"</strong></td></tr>";
     }).join("");
     const thead="<thead><tr><th>"+t("Item","பொருள்")+"</th>"+colHeaders+"<th>"+t("Total","மொத்தம்")+"</th></tr></thead>";
     printHTML(t("Shopping List","கொள்முதல் பட்டியல்")+" ("+fromDate+" – "+toDate+")",
@@ -3860,10 +4323,10 @@ function PoojaWeeklyShopPage({ctx}){
                   <td style={css.td}><strong>{n(r.item)}</strong></td>
                   {columns.map(c=>(
                     <td key={c.key} style={{...css.td,textAlign:"center"}}>
-                      {r.byCol[c.key]?<strong style={{color:c.type==="occasion"?P.purple:P.saffron}}>{r.byCol[c.key]}</strong>:<span style={{color:"#DDD"}}>—</span>}
+                      {r.byCol[c.key]?<strong style={{color:c.type==="occasion"?P.purple:P.saffron}}>{round2(r.byCol[c.key])}</strong>:<span style={{color:"#DDD"}}>—</span>}
                     </td>
                   ))}
-                  <td style={{...css.td,textAlign:"center",background:"#FFFBE8"}}><strong>{r.total} {r.item.unit}</strong></td>
+                  <td style={{...css.td,textAlign:"center",background:"#FFFBE8"}}><strong>{round2(r.total)} {r.item.unit}</strong></td>
                 </tr>
               ))}
             </tbody>
