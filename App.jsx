@@ -1803,6 +1803,86 @@ function OrdersPage({ctx}){
   const [dupFrom,setDupFrom]=useState(TODAY);
   const [dupTo,setDupTo]=useState(TODAY);
   const [dupSess,setDupSess]=useState("All");
+  const importFileRef=useRef();
+  const [importMsg,setImportMsg]=useState("");
+
+  const downloadMenuTemplate=()=>{
+    const sample=[
+      {Date:TODAY,Location:locations[0]?.name||"Madalayam",Session:"Lunch",Recipe:recipes[0]?.name||"Sambar",Qty:20,Pax:200,Gurupooja:""},
+      {Date:TODAY,Location:locations[0]?.name||"Madalayam",Session:"Lunch",Recipe:recipes[1]?.name||"Rasam",Qty:15,Pax:200,Gurupooja:""},
+      {Date:TODAY,Location:locations[0]?.name||"Madalayam",Session:"Lunch",Recipe:"Vada",Qty:5,Pax:250,Gurupooja:"Yes"},
+    ];
+    const ws=XLSX.utils.json_to_sheet(sample);
+    ws["!cols"]=[{wch:12},{wch:18},{wch:12},{wch:26},{wch:8},{wch:8},{wch:11}];
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Menu");
+    XLSX.writeFile(wb,"menu_import_template.xlsx");
+  };
+
+  const importMenuXlsx=e=>{
+    const file=e.target.files[0]; if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const wb=XLSX.read(ev.target.result,{type:"binary"});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+      const valid=rows.filter(r=>(r.Date+"").trim()&&(r.Recipe+"").trim()&&r.Qty!=="");
+      if(!valid.length){alert("No valid rows found. Headers needed: Date, Location, Session, Recipe, Qty, Pax (optional), Gurupooja (optional)");return;}
+
+      let created=0,updated=0; const skipped=[];
+      let idCounter=Date.now();
+
+      setOrders(prev=>{
+        const next=[...prev];
+        const byDate={};
+        valid.forEach(r=>{
+          const dateStr=(r.Date instanceof Date)?r.Date.toISOString().slice(0,10):(r.Date+"").trim();
+          if(!byDate[dateStr])byDate[dateStr]=[];
+          byDate[dateStr].push(r);
+        });
+        Object.entries(byDate).forEach(([dateStr,rowsForDate])=>{
+          const entries=[];
+          rowsForDate.forEach(r=>{
+            const loc=locations.find(l=>l.name.toLowerCase()===(r.Location+"").trim().toLowerCase());
+            const sess=SESSIONS.find(s=>s.toLowerCase()===(r.Session+"").trim().toLowerCase());
+            const rec=recipes.find(x=>x.name.toLowerCase()===(r.Recipe+"").trim().toLowerCase()||(x.nameTamil||"").toLowerCase()===(r.Recipe+"").trim().toLowerCase());
+            if(!loc||!sess||!rec){skipped.push((r.Recipe||"?")+" ("+dateStr+")");return;}
+            const qty=+r.Qty||0; if(!qty)return;
+            const pax=r.Pax?+r.Pax:null;
+            entries.push({locId:loc.id,session:sess,recId:rec.id,qty,baseQty:qty,basePax:pax,yu:rec.yieldUnit||"kg"});
+          });
+          if(!entries.length)return;
+          const isGuru=rowsForDate.some(r=>["yes","true","1"].includes((r.Gurupooja+"").trim().toLowerCase()));
+          const existingIdx=next.findIndex(o=>o.source==="excel_import"&&o.date===dateStr);
+          if(existingIdx>=0){
+            const existing=next[existingIdx];
+            let mergedEntries=[...existing.entries];
+            entries.forEach(en=>{
+              const idx=mergedEntries.findIndex(x=>x.locId===en.locId&&x.session===en.session&&x.recId===en.recId);
+              if(idx>=0)mergedEntries[idx]={...mergedEntries[idx],qty:en.qty,baseQty:en.qty,basePax:en.basePax??mergedEntries[idx].basePax};
+              else mergedEntries.push(en);
+            });
+            next[existingIdx]={...existing,entries:mergedEntries};
+            updated++;
+          } else {
+            const paxVal=entries.find(en=>en.basePax)?.basePax||"";
+            next.push({
+              id:idCounter++,
+              name:(isGuru?"🕉️ "+t("Gurupooja Menu","குருபூஜை உணவு"):t("Menu","உணவு பட்டியல்"))+" — "+dateStr,
+              date:dateStr,isTemplate:false,pax:paxVal,source:"excel_import",entries,
+            });
+            created++;
+          }
+        });
+        return next;
+      });
+
+      setImportMsg(created+" "+t("day(s) created","புதிய நாட்கள்")+", "+updated+" "+t("day(s) updated","புதுப்பிக்கப்பட்ட நாட்கள்")+
+        (skipped.length?", "+skipped.length+" "+t("row(s) skipped (no match)","பொருந்தாத வரிசைகள்")+": "+skipped.slice(0,6).join(", "):""));
+    };
+    reader.readAsBinaryString(file);
+    e.target.value="";
+  };
 
   const filtReal=[...real]
     .sort((a,b)=>b.date.localeCompare(a.date))
@@ -1845,9 +1925,22 @@ function OrdersPage({ctx}){
         <button data-tour="new-order" style={css.btn()} onClick={()=>setModal({type:"order"})}>+ {t("New Order","புதிய ஆர்டர்")}</button>
         <button style={css.btn("ghost")} onClick={()=>setModal({type:"addLoc"})}>📍 {t("Add Location","இடம் சேர்")}</button>
         <button data-tour="duplicate-day" style={css.btn(dupOpen?"primary":"ghost")} onClick={()=>setDupOpen(!dupOpen)}>📅 {t("Duplicate Day","நாள் நகலெடு")}</button>
+        <button style={css.btn("ghost")} onClick={downloadMenuTemplate}>📋 {t("Menu Template","உணவு டெம்ப்ளேட்")}</button>
+        <button style={css.btn("success")} onClick={()=>importFileRef.current.click()}>📤 {t("Import Menu (Excel)","உணவு இறக்கு")}</button>
+        <input ref={importFileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importMenuXlsx}/>
         <input type="date" style={{...css.inp,width:150}} placeholder="Filter by date" value={dateQ} onChange={e=>setDateQ(e.target.value)}/>
         <input style={{...css.inp,maxWidth:200}} placeholder={t("Search order name...","பெயர் தேடு...")} value={nameQ} onChange={e=>setNameQ(e.target.value)}/>
         {(dateQ||nameQ)&&<button style={css.btn("ghost",true)} onClick={()=>{setDateQ("");setNameQ("");}}>✕ Clear</button>}
+      </div>
+
+      {importMsg&&(
+        <div style={{background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8,padding:"8px 14px",marginBottom:12,fontSize:12,color:"#166534",fontWeight:600}}>
+          ✓ {importMsg}
+        </div>
+      )}
+
+      <div style={{fontSize:11,color:P.muted,marginBottom:14,marginTop:-6}}>
+        {t("Excel columns needed: Date, Location, Session, Recipe, Qty, Pax (optional), Gurupooja (optional \"Yes\"). Re-uploading a file with more dates added merges in only the new dates — existing ones update in place.","தேவையான தலைப்புகள்: Date, Location, Session, Recipe, Qty, Pax, Gurupooja. மீண்டும் பதிவேற்றினால் புதிய தேதிகள் மட்டும் சேர்க்கப்படும்.")}
       </div>
 
       {dupOpen&&(
@@ -3914,6 +4007,7 @@ function PoojaTemplesPage({ctx}){
 function PoojaDispatchPage({ctx}){
   const {poojaTemples,poojaItems,poojaDels,setPoojaDels,setPage,setQuickDate,lang}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
+  const n=(x)=>lang==="en"?x.name:(x.nameTamil||x.name);
   const [dt,setDt]=useState(TODAY);
   const [view,setView]=useState("dispatch");
   // Overrides: {templeId_itemId_slot: qty}
@@ -4063,7 +4157,7 @@ function PoojaDispatchPage({ctx}){
           {activeTemples.map(tm=>(
             <div key={tm.id} style={{...css.card,marginBottom:12}}>
               <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:P.deepBrown,marginBottom:10}}>
-                🛕 {tm.name}
+                🛕 {n(tm)}
                 {tm.location&&<span style={{fontSize:12,color:P.muted,marginLeft:8,fontFamily:"sans-serif",fontWeight:400}}>{tm.location}</span>}
               </div>
               <table style={{...css.table,marginBottom:0}}>
@@ -4077,7 +4171,7 @@ function PoojaDispatchPage({ctx}){
                     if(!hasAny)return null;
                     return(
                       <tr key={pi.id} style={{background:i%2===0?P.white:P.highlight}}>
-                        <td style={css.td}><strong>{pi.name}</strong></td>
+                        <td style={css.td}><strong>{n(pi)}</strong></td>
                         {SLOTS.map(s=>{
                           const qty=getQty(tm.id,pi.id,s.key);
                           const done=isDispatched(tm.id,pi.id,s.key);
@@ -4092,7 +4186,7 @@ function PoojaDispatchPage({ctx}){
                                     value={qty} onChange={e=>setQty(tm.id,pi.id,s.key,e.target.value)}
                                     disabled={done}/>
                                   <span style={{fontSize:10,color:P.muted}}>{pi.unit}</span>
-                                  <button onClick={()=>toggleDispatch(tm.id,pi.id,s.key,tm.name,pi.name,pi.unit)}
+                                  <button onClick={()=>toggleDispatch(tm.id,pi.id,s.key,n(tm),n(pi),pi.unit)}
                                     style={{...css.btn(done?"success":"ghost",true),fontSize:11,padding:"3px 12px"}}>
                                     {done?"✓ "+t("Done","முடிந்தது"):t("Dispatch","அனுப்பு")}
                                   </button>
@@ -4827,6 +4921,30 @@ function OccOrdersPage({ctx}){
       (dates.length-toCreate.length>0?" ("+(dates.length-toCreate.length)+" "+t("already existed, skipped","ஏற்கனவே உள்ளன")+")":""));
   };
 
+  // ── Custom bulk create: any template, any pasted list of dates (e.g. Gurupooja once dates are known) ──
+  const [customTplId,setCustomTplId]=useState("");
+  const [customDatesText,setCustomDatesText]=useState("");
+  const [customMsg,setCustomMsg]=useState("");
+  const bulkCreateCustom=()=>{
+    const tpl=occTemplates.find(x=>x.id===+customTplId);
+    if(!tpl){setCustomMsg(t("Select a template first.","முதலில் மாதிரி தேர்வு செய்யவும்."));return;}
+    const dates=[...new Set(customDatesText.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean))];
+    if(!dates.length){setCustomMsg(t("Paste at least one date (YYYY-MM-DD, one per line or comma-separated).","குறைந்தது ஒரு தேதியையாவது சேர்க்கவும்."));return;}
+    const bad=dates.filter(d=>!/^\d{4}-\d{2}-\d{2}$/.test(d));
+    if(bad.length){setCustomMsg(t("Invalid date format (use YYYY-MM-DD):","தவறான தேதி வடிவம்:")+" "+bad.slice(0,5).join(", "));return;}
+    const existing=new Set(occOrders.filter(o=>o.templateId===tpl.id).map(o=>o.date));
+    const toCreate=dates.filter(d=>!existing.has(d));
+    if(!toCreate.length){setCustomMsg(t("All dates already have orders for","")+" "+tpl.name+".");return;}
+    const newOrders=toCreate.map((d,i)=>({
+      id:Date.now()+i,templateId:tpl.id,templateName:tpl.name,templateNameTamil:tpl.nameTamil,
+      date:d,items:(tpl.items||[]).map(it=>({...it})),
+    }));
+    setOccOrders(p=>[...p,...newOrders]);
+    setCustomMsg(toCreate.length+" "+t("order(s) created for","ஆர்டர்கள் உருவாக்கப்பட்டன")+" "+tpl.name+
+      (dates.length-toCreate.length>0?" ("+(dates.length-toCreate.length)+" "+t("already existed, skipped","ஏற்கனவே உள்ளன")+")":""));
+    setCustomDatesText("");
+  };
+
   const addItem=(ordId)=>{
     if(!ni.itemId||!ni.qty)return;
     setOccOrders(p=>p.map(o=>o.id!==ordId?o:{...o,items:[...(o.items||[]),{itemId:+ni.itemId,qty:+ni.qty}]}));
@@ -4853,6 +4971,32 @@ function OccOrdersPage({ctx}){
           <button style={css.btn("success")} onClick={()=>bulkCreate("pradosham","Pradosham")}>🕉️ {t("Pradosham (11 dates)","பிரதோஷம் (11)")}</button>
         </div>
         {bulkMsg&&<div style={{fontSize:12,color:P.deepBrown,marginTop:10,fontWeight:600}}>{bulkMsg}</div>}
+      </div>
+
+      <div style={{...css.card,background:"#FFF8EC",border:"1px solid #F5D76E"}}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:P.deepBrown,marginBottom:8}}>
+          📆 {t("Custom Bulk Create — Any Template, Any Dates","தனிப்பயன் குவிப்பு — எந்த மாதிரி, எந்த தேதி")}
+        </div>
+        <div style={{fontSize:11,color:P.muted,marginBottom:10}}>
+          {t("For occasions without a fixed panchang list — e.g. Gurupooja. Pick a template, paste the dates (YYYY-MM-DD, one per line or comma-separated), and create them all at once.","இது நிலையான தேதிகள் இல்லாத சிறப்பு நாட்களுக்கு — எ.கா. குருபூஜை.")}
+        </div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-start"}}>
+          <div>
+            <label style={css.lbl}>{t("Template","மாதிரி")}</label>
+            <select style={{...css.sel,minWidth:180}} value={customTplId} onChange={e=>setCustomTplId(e.target.value)}>
+              <option value="">{t("Select template...","மாதிரி தேர்வு...")}</option>
+              {occTemplates.map(tp=><option key={tp.id} value={tp.id}>{lang==="en"?tp.name:(tp.nameTamil||tp.name)}</option>)}
+            </select>
+          </div>
+          <div style={{flex:1,minWidth:220}}>
+            <label style={css.lbl}>{t("Dates","தேதிகள்")}</label>
+            <textarea style={{...css.inp,minHeight:70,fontFamily:"monospace",fontSize:12}} value={customDatesText}
+              onChange={e=>setCustomDatesText(e.target.value)}
+              placeholder={"2026-09-05\n2026-10-03\n2026-11-01"}/>
+          </div>
+          <button style={{...css.btn("primary"),alignSelf:"flex-end"}} onClick={bulkCreateCustom}>⚡ {t("Create Orders","ஆர்டர்கள் உருவாக்கு")}</button>
+        </div>
+        {customMsg&&<div style={{fontSize:12,color:P.deepBrown,marginTop:10,fontWeight:600}}>{customMsg}</div>}
       </div>
 
       <div style={css.card}>
