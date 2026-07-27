@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useKitchenData } from "./useKitchenData.js";
 import { RTYPE_SEED } from "./seeds.js";
 import * as XLSX from "xlsx";
+import Joyride, { STATUS, ACTIONS, EVENTS } from "react-joyride";
 function PostIssues({ctx,date,onClose}){
   const {orders,recipes,ingredients,setInventory,lang}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
@@ -408,10 +409,89 @@ function App(){
     ingredients,setIngredients,recipes,setRecipes,
     orders,setOrders,inventory,setInventory,locations,setLocations,recipeTypes,setRecipeTypes,
     poojaItems,setPoojaItems,poojaTemples,setPoojaTemples,poojaDels,setPoojaDels,
-    occTemplates,setOccTemplates,occOrders,setOccOrders} = useKitchenData();
+    occTemplates,setOccTemplates,occOrders,setOccOrders,
+    tourCompleted,markTourCompleted} = useKitchenData();
 
-  const ctx={lang,ingredients,setIngredients,recipes,setRecipes,locations,setLocations,orders,setOrders,inventory,setInventory,recipeTypes,setRecipeTypes,setModal,poojaItems,setPoojaItems,poojaTemples,setPoojaTemples,poojaDels,setPoojaDels,occTemplates,setOccTemplates,occOrders,setOccOrders};
+  const [quickDate,setQuickDate]=useState(TODAY);
+  const ctx={lang,ingredients,setIngredients,recipes,setRecipes,locations,setLocations,orders,setOrders,inventory,setInventory,recipeTypes,setRecipeTypes,setModal,poojaItems,setPoojaItems,poojaTemples,setPoojaTemples,poojaDels,setPoojaDels,occTemplates,setOccTemplates,occOrders,setOccOrders,setPage,quickDate,setQuickDate};
   const t=(en,ta)=>lang==="en"?en:ta;
+
+  // ── First-time interactive tour (React Joyride) ─────────────────────────
+  const [tourRun,setTourRun]=useState(false);
+  const [tourStepIndex,setTourStepIndex]=useState(0);
+  const tourAutoStarted=useRef(false);
+
+  const tourSteps=useMemo(()=>[
+    {target:"[data-tour='tour-logo']",page:"ingredients",disableBeacon:true,
+      content:t("Welcome to Koviloor Kitchen! Let's take a quick tour of the major features.","கோவிலூர் கிச்சனுக்கு வரவேற்கிறோம்! முக்கிய அம்சங்களை சுற்றிப் பார்ப்போம்.")},
+    {target:"[data-tour='nav-ingredients']",page:"ingredients",
+      content:t("Ingredients — your master list of raw materials with cost, category, and unit.","பொருட்கள் — மூலப்பொருட்களின் அடிப்படை பட்டியல்.")},
+    {target:"[data-tour='add-ingredient']",page:"ingredients",
+      content:t("Add a new ingredient here anytime. Import/Export Excel buttons are above for bulk work.","புதிய பொருளை இங்கே சேர்க்கலாம்.")},
+    {target:"[data-tour='ing-substitute']",page:"ingredients",
+      content:t("Use Substitute to bulk-replace one ingredient with another across every recipe — useful when prices change.","விலை மாறும்போது ஒரு பொருளை மற்றொன்றால் மாற்ற இதைப் பயன்படுத்தவும்.")},
+    {target:"[data-tour='nav-recipes']",page:"recipes",
+      content:t("Recipes — every dish, its ingredients, cost, and prep steps live here.","சமையல் குறிப்புகள் — உணவுகளும் அவற்றின் பொருட்களும்.")},
+    {target:"[data-tour='add-recipe']",page:"recipes",
+      content:t("Add a brand-new recipe here. Existing recipes can be duplicated with one click too.","புதிய சமையல் குறிப்பை இங்கே சேர்க்கவும்.")},
+    {target:"[data-tour='nav-orders']",page:"orders",
+      content:t("Orders — what's being cooked, for whom, and when.","ஆர்டர்கள் — என்ன சமைக்கப்படுகிறது, யாருக்கு, எப்போது.")},
+    {target:"[data-tour='new-order']",page:"orders",
+      content:t("Create a new order here — pick location, session, dishes, and quantities.","புதிய ஆர்டரை இங்கே உருவாக்கவும்.")},
+    {target:"[data-tour='duplicate-day']",page:"orders",
+      content:t("Already planned a similar day? Duplicate all of that day's orders straight to a new date.","ஒத்த நாளை நகலெடுத்து புதிய தேதிக்கு பயன்படுத்தலாம்.")},
+    {target:"[data-tour='nav-reports']",page:"orders",
+      content:t("Reports — Dish-wise Ingredients, Shopping Lists, Weekly Menu, Cost Analysis, Compare Recipes, and more live in this section.","அறிக்கைகள் — பொருட்கள், கொள்முதல் பட்டியல், செலவு பகுப்பாய்வு போன்றவை இங்கே.")},
+    {target:"[data-tour='nav-inventory']",page:"orders",
+      content:t("Inventory — track purchases, issues, stock balance, and cost deviation alerts.","சரக்கு மேலாண்மை — கொள்முதல், வழங்கல், இருப்பு.")},
+    {target:"[data-tour='nav-pooja']",page:"orders",
+      content:t("Pooja Material — items, temple schedules, dispatch, and purchase planning for temple issues.","பூஜை பொருள் — கோவில் அட்டவணை மற்றும் கொள்முதல்.")},
+    {target:"[data-tour='pooja-add-item']",page:"pooja_items",
+      content:t("Add pooja items here — these feed both the temple weekly schedule and occasion templates.","பூஜை பொருட்களை இங்கே சேர்க்கவும்.")},
+    {target:"[data-tour='nav-occasions']",page:"pooja_items",
+      content:t("Temple Occasions — templates for Moolam, Pradosham, Ekadasi etc., turned into dated orders.","கோவில் சிறப்பு நாட்கள் — மூலம், பிரதோஷம் போன்றவற்றுக்கான மாதிரிகள்.")},
+    {target:"[data-tour='occ-bulk-create']",page:"occ_orders",
+      content:t("Bulk-create known occasion dates for the rest of the year in one click, matched to your templates.","இந்த வருடத்திற்கான தேதிகளை ஒரே கிளிக்கில் உருவாக்கவும்.")},
+    {target:"[data-tour='lang-select']",page:"occ_orders",
+      content:t("Switch the whole app between English and Tamil anytime from here.","இங்கிருந்து மொழியை மாற்றலாம்.")},
+    {target:"[data-tour='save-btn']",page:"occ_orders",
+      content:t("Changes auto-save, but you can force an immediate save here if you're about to close the tab.","மாற்றங்கள் தானாக சேமிக்கப்படும்; உடனடியாக சேமிக்கவும் இங்கே முடியும்.")},
+    {target:"[data-tour='nav-help_tour']",page:"occ_orders",
+      content:t("You can replay this tour anytime from Help → Take Tour. That's it — happy cooking!","இந்த சுற்றுப்பயணத்தை Help → Take Tour-இல் இருந்து மீண்டும் பார்க்கலாம்.")},
+  ],[lang]);
+
+  const startTour=()=>{
+    setPage("ingredients");
+    setTourStepIndex(0);
+    setTimeout(()=>setTourRun(true),300);
+  };
+
+  useEffect(()=>{
+    if(loaded&&tourCompleted===false&&!tourAutoStarted.current){
+      tourAutoStarted.current=true;
+      setTimeout(()=>{setPage("ingredients");setTourStepIndex(0);setTourRun(true);},900);
+    }
+  },[loaded,tourCompleted]);
+
+  const handleJoyrideCallback=(data)=>{
+    const {action,index,status,type}=data;
+    if(status===STATUS.FINISHED||status===STATUS.SKIPPED){
+      setTourRun(false);
+      if(!tourCompleted)markTourCompleted(true);
+      return;
+    }
+    if(type===EVENTS.STEP_AFTER||type===EVENTS.TARGET_NOT_FOUND){
+      const nextIndex=index+(action===ACTIONS.PREV?-1:1);
+      if(nextIndex<0||nextIndex>=tourSteps.length){setTourRun(false);return;}
+      const nextStep=tourSteps[nextIndex];
+      if(nextStep.page&&nextStep.page!==page){
+        setPage(nextStep.page);
+        setTimeout(()=>setTourStepIndex(nextIndex),350);
+      } else {
+        setTourStepIndex(nextIndex);
+      }
+    }
+  };
 
   const NAV=[
     {id:"ingredients",icon:"🧂",en:"Ingredients",ta:"பொருட்கள்"},
@@ -432,6 +512,7 @@ function App(){
       {id:"pooja_items",en:"Items Master",ta:"பொருட்கள்"},
       {id:"pooja_temples",en:"Temples & Lists",ta:"கோவில்கள்"},
       {id:"pooja_dispatch",en:"Dispatch",ta:"அனுப்புதல்"},
+      {id:"pooja_send",en:"Items to Send",ta:"அனுப்ப வேண்டிய பொருட்கள்"},
       {id:"pooja_purchase",en:"Purchase Summary",ta:"கொள்முதல்"},
       {id:"pooja_weekly",en:"Weekly Issue List",ta:"வார அனுப்புதல் பட்டியல்"},
       {id:"pooja_weekshop",en:"Shopping List (Range)",ta:"கொள்முதல் பட்டியல் (வரம்பு)"},
@@ -441,6 +522,9 @@ function App(){
       {id:"occ_orders",en:"Orders",ta:"ஆர்டர்கள்"},
       {id:"occ_purchase",en:"Purchase Planning",ta:"கொள்முதல் திட்டம்"},
     ]},
+    {id:"help",icon:"❓",en:"Help",ta:"உதவி",children:[
+      {id:"help_tour",en:"Take Tour",ta:"சுற்றுப்பயணம் தொடங்கு"},
+    ]},
   ];
   const flat=NAV.flatMap(n=>n.children?[n,...n.children]:[n]);
   const cur=flat.find(p=>p.id===page)||NAV[0];
@@ -448,8 +532,27 @@ function App(){
   if(!loaded) return(<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#FEF6E8",flexDirection:"column",gap:12}}><div style={{fontSize:32}}>🍛</div><div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#5C2A0A"}}>Koviloor Kitchen</div><div style={{fontSize:13,color:"#9B7355"}}>Loading from cloud...</div></div>);
   return (
     <div style={css.app}>
+      <Joyride
+        steps={tourSteps}
+        run={tourRun}
+        stepIndex={tourStepIndex}
+        callback={handleJoyrideCallback}
+        continuous
+        showProgress
+        showSkipButton
+        scrollToFirstStep
+        disableOverlayClose
+        locale={{back:t("Previous","முந்தையது"),next:t("Next","அடுத்தது"),skip:t("Skip","தவிர்"),last:t("Finish","முடி")}}
+        styles={{
+          options:{primaryColor:P.saffron,textColor:P.deepBrown,zIndex:10000,arrowColor:P.white,backgroundColor:P.white,width:Math.min(340,typeof window!=="undefined"?window.innerWidth-32:340)},
+          tooltip:{borderRadius:10,fontSize:13},
+          buttonNext:{background:P.saffron,borderRadius:7,padding:"7px 14px"},
+          buttonBack:{color:P.muted,marginRight:8},
+          buttonSkip:{color:P.muted},
+        }}
+      />
       <nav style={css.nav}>
-        <div style={css.navTop}>
+        <div style={css.navTop} data-tour="tour-logo">
           <div style={{fontSize:26,marginBottom:4}}>🍛</div>
           <div style={css.navTitle}>Koviloor Kitchen</div>
           <div style={css.navSub}>கோவிலூர் அன்னதானம்</div>
@@ -457,11 +560,15 @@ function App(){
         <div style={{padding:"10px 0"}}>
           {NAV.map(n=>(
             <div key={n.id}>
-              <div style={css.navItem(!n.children&&page===n.id)} href={"#"+n.id} onClick={e=>{if(n.children)e.preventDefault();else{e.preventDefault();setPage(n.id);}}}>
+              <div style={css.navItem(!n.children&&page===n.id)} data-tour={"nav-"+n.id} href={"#"+n.id} onClick={e=>{if(n.children)e.preventDefault();else{e.preventDefault();setPage(n.id);}}}>
                 <span>{n.icon}</span><span>{t(n.en,n.ta)}</span>
               </div>
               {n.children?.map(c=>(
-                <div key={c.id} style={css.navItem(page===c.id,true)} href={"#"+c.id} onClick={e=>{e.preventDefault();setPage(c.id);}}>
+                <div key={c.id} style={css.navItem(page===c.id,true)} data-tour={"nav-"+c.id} href={"#"+c.id} onClick={e=>{
+                  e.preventDefault();
+                  if(c.id==="help_tour"){startTour();}
+                  else{setPage(c.id);}
+                }}>
                   <span style={{opacity:0.4}}>└</span><span>{t(c.en,c.ta)}</span>
                 </div>
               ))}
@@ -473,14 +580,14 @@ function App(){
       <main style={css.main}>
         <div style={css.topbar}>
           <div style={css.pageTitle}>{t(cur.en,cur.ta)}</div>
-          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          <div style={{display:"flex",gap:6,alignItems:"center"}} data-tour="lang-select">
             <span style={{fontSize:11,color:P.muted}}>🌐</span>
             <select style={{...css.sel,fontSize:11,padding:"4px 8px"}} value={lang} onChange={e=>setLang(e.target.value)}>
               <option value="en">English</option>
               <option value="ta">தமிழ்</option>
             </select>
           </div>
-          <button disabled={saveStatus==="saving"||saveStatus==="idle"||saveStatus==="saved"} onClick={forceSave} style={{marginLeft:12,padding:"6px 18px",borderRadius:7,border:"none",cursor:saveStatus==="pending"?"pointer":"default",fontWeight:700,fontSize:12,background:saveStatus==="error"?"#C0392B":saveStatus==="saved"?"#1A7A40":saveStatus==="pending"?"#E8821A":"#DCC88A",color:"white",opacity:saveStatus==="idle"||saveStatus==="saved"?0.6:1,transition:"all 0.2s"}}>{saveStatus==="saving"?"⏳ Saving...":saveStatus==="saved"?"✓ Saved":saveStatus==="error"?"⚠ Retry Save":"💾 Save"}</button>
+          <button data-tour="save-btn" disabled={saveStatus==="saving"||saveStatus==="idle"||saveStatus==="saved"} onClick={forceSave} style={{marginLeft:12,padding:"6px 18px",borderRadius:7,border:"none",cursor:saveStatus==="pending"?"pointer":"default",fontWeight:700,fontSize:12,background:saveStatus==="error"?"#C0392B":saveStatus==="saved"?"#1A7A40":saveStatus==="pending"?"#E8821A":"#DCC88A",color:"white",opacity:saveStatus==="idle"||saveStatus==="saved"?0.6:1,transition:"all 0.2s"}}>{saveStatus==="saving"?"⏳ Saving...":saveStatus==="saved"?"✓ Saved":saveStatus==="error"?"⚠ Retry Save":"💾 Save"}</button>
           <button onClick={()=>{sessionStorage.removeItem("kk_auth");window.location.reload();}} style={{marginLeft:8,padding:"6px 12px",borderRadius:7,border:"1px solid #DCC88A",background:"transparent",color:"#9B7355",fontSize:12,cursor:"pointer",fontWeight:600}}>🔒 Lock</button>
         </div>
         <div style={css.content}>
@@ -499,6 +606,7 @@ function App(){
           {page==="pooja_items"&&<PoojaItemsPage ctx={ctx}/>}
           {page==="pooja_temples"&&<PoojaTemplesPage ctx={ctx}/>}
           {page==="pooja_dispatch"&&<PoojaDispatchPage ctx={ctx}/>}
+          {page==="pooja_send"&&<PoojaSendPage ctx={ctx}/>}
           {page==="pooja_purchase"&&<PoojaPurchasePage ctx={ctx}/>}
           {page==="pooja_weekly"&&<PoojaWeeklyIssuePage ctx={ctx}/>}
           {page==="pooja_weekshop"&&<PoojaWeeklyShopPage ctx={ctx}/>}
@@ -700,7 +808,7 @@ function IngsPage({ctx}){
             onClick={()=>setShowDupes(!showDupes)}>
             ⚠️ {t("Check Duplicates","நகல் சரிபார்")}{dupGroups.length>0?" ("+dupGroups.length+")":""}
           </button>
-          <button style={{...css.btn("ghost",true),borderColor:P.info,color:P.info}} onClick={()=>setModal({type:"ingSubstitute"})}>
+          <button data-tour="ing-substitute" style={{...css.btn("ghost",true),borderColor:P.info,color:P.info}} onClick={()=>setModal({type:"ingSubstitute"})}>
             🔄 {t("Substitute Ingredient","பொருள் மாற்று")}
           </button>
           <button style={css.btn("ghost",true)} onClick={exportIngredients}>⬇️ {t("Export Excel","Excel ஏற்று")}</button>
@@ -764,7 +872,7 @@ function IngsPage({ctx}){
               <td style={css.td}>{(nr.category==="vegetable"||nr.category==="cut")&&<input type="number" step="0.01" min="0.1" max="1" style={{...css.inp,width:65}} placeholder="0.85" value={nr.cutYield||""} onChange={e=>setNr({...nr,cutYield:e.target.value})}/>}</td>
               <td style={css.td}><input type="number" step="0.05" style={{...css.inp,width:70}} placeholder="0.75" value={nr.scalingFactor} onChange={e=>setNr({...nr,scalingFactor:e.target.value})}/></td>
               <td style={css.td}><input type="number" style={{...css.inp,width:80}} placeholder="200" value={nr.scalingBenchmark} onChange={e=>setNr({...nr,scalingBenchmark:e.target.value})}/></td>
-              <td style={css.td}><button style={css.btn("primary",true)} onClick={addNew}>+ {t("Add","சேர்")}</button></td>
+              <td style={css.td}><button data-tour="add-ingredient" style={css.btn("primary",true)} onClick={addNew}>+ {t("Add","சேர்")}</button></td>
             </tr>
           </tbody>
         </table>
@@ -1083,7 +1191,7 @@ function RecsPage({ctx}){
           <button style={css.btn("ghost",true)} onClick={exportRecipes}>⬇️ {t("Export Names","பெயர் ஏற்று")}</button>
           <button style={css.btn("success",true)} onClick={()=>recFileRef.current.click()}>📤 {t("Import Tamil","தமிழ் இறக்கு")}</button>
           <input ref={recFileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importRecipesTamil}/>
-          <button style={css.btn()} onClick={()=>setModal({type:"recipe"})}>+ {t("Add Recipe","சேர்")}</button>
+          <button data-tour="add-recipe" style={css.btn()} onClick={()=>setModal({type:"recipe"})}>+ {t("Add Recipe","சேர்")}</button>
         </div>
       </div>
       <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
@@ -1734,9 +1842,9 @@ function OrdersPage({ctx}){
   return(
     <div>
       <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
-        <button style={css.btn()} onClick={()=>setModal({type:"order"})}>+ {t("New Order","புதிய ஆர்டர்")}</button>
+        <button data-tour="new-order" style={css.btn()} onClick={()=>setModal({type:"order"})}>+ {t("New Order","புதிய ஆர்டர்")}</button>
         <button style={css.btn("ghost")} onClick={()=>setModal({type:"addLoc"})}>📍 {t("Add Location","இடம் சேர்")}</button>
-        <button style={css.btn(dupOpen?"primary":"ghost")} onClick={()=>setDupOpen(!dupOpen)}>📅 {t("Duplicate Day","நாள் நகலெடு")}</button>
+        <button data-tour="duplicate-day" style={css.btn(dupOpen?"primary":"ghost")} onClick={()=>setDupOpen(!dupOpen)}>📅 {t("Duplicate Day","நாள் நகலெடு")}</button>
         <input type="date" style={{...css.inp,width:150}} placeholder="Filter by date" value={dateQ} onChange={e=>setDateQ(e.target.value)}/>
         <input style={{...css.inp,maxWidth:200}} placeholder={t("Search order name...","பெயர் தேடு...")} value={nameQ} onChange={e=>setNameQ(e.target.value)}/>
         {(dateQ||nameQ)&&<button style={css.btn("ghost",true)} onClick={()=>{setDateQ("");setNameQ("");}}>✕ Clear</button>}
@@ -3601,7 +3709,7 @@ function PoojaItemsPage({ctx}){
             </select>
           </div>
         </div>
-        <button style={css.btn()} onClick={add}>+ {t("Add Item","சேர்")}</button>
+        <button data-tour="pooja-add-item" style={css.btn()} onClick={add}>+ {t("Add Item","சேர்")}</button>
       </div>
       <div style={{...css.card,padding:0,overflow:"hidden"}}>
         <table style={css.table}>
@@ -3804,7 +3912,7 @@ function PoojaTemplesPage({ctx}){
 }
 
 function PoojaDispatchPage({ctx}){
-  const {poojaTemples,poojaItems,poojaDels,setPoojaDels,lang}=ctx;
+  const {poojaTemples,poojaItems,poojaDels,setPoojaDels,setPage,setQuickDate,lang}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
   const [dt,setDt]=useState(TODAY);
   const [view,setView]=useState("dispatch");
@@ -3903,7 +4011,7 @@ function PoojaDispatchPage({ctx}){
         return `<tr style='background:${i%2===0?"white":"#F5F5F5"}'><td style='padding:5px 10px;border:1px solid #CCC;font-size:12px;font-weight:600'>${pi.nameTamil||pi.name}</td>${tds}</tr>`;
       }).join("");
 
-      return `<div style='margin-bottom:24px;page-break-inside:avoid'>
+      return `<div style='margin-bottom:14px'>
         <div style='font-size:14px;font-weight:700;border-bottom:2px solid #000;padding-bottom:4px;margin-bottom:8px'>${sl.icon} ${sl.label}</div>
         <table style='width:100%;border-collapse:collapse'>
           <thead><tr>
@@ -3940,6 +4048,8 @@ function PoojaDispatchPage({ctx}){
           {saved&&<span style={{fontSize:12,color:P.success,fontWeight:700,paddingBottom:6}}>✓ {t("Saved","சேமிக்கப்பட்டது")}</span>}
           <button style={css.btn(view==="dispatch"?"primary":"ghost",true)} onClick={()=>setView("dispatch")}>📦 {t("Dispatch","அனுப்புதல்")}</button>
           <button style={css.btn(view==="history"?"primary":"ghost",true)} onClick={()=>setView("history")}>📋 {t("History","வரலாறு")}</button>
+          <button style={css.btn("ghost",true)} onClick={()=>{setQuickDate(dt);setPage("pooja_send");}}>📋 {t("Items to Send","அனுப்ப வேண்டியவை")}</button>
+          <button style={{...css.btn("ghost",true),borderColor:P.success,color:P.success}} onClick={()=>{setQuickDate(dt);setPage("pooja_weekshop");}}>🛒 {t("Purchase","கொள்முதல்")}</button>
           <button style={css.btn("ghost",true)} onClick={exportSheet}>📥 Excel</button>
           <button style={css.btn("primary",true)} onClick={printReport}>🖨 {t("Print Report","அறிக்கை அச்சு")}</button>
         </div>
@@ -4020,6 +4130,191 @@ function PoojaDispatchPage({ctx}){
           </div>
         ));
       })()}
+    </div>
+  );
+}
+
+// ── Items to Send: clean, date-based, organized like the Kitchen Dish-wise report ──
+function PoojaSendPage({ctx}){
+  const {poojaTemples,poojaItems,occOrders,setPage,setQuickDate,lang:gLang}=ctx;
+  const [lang,setLang]=useState(gLang);
+  const t=(en,ta)=>lang==="en"?en:ta;
+  const n=(x)=>lang==="en"?x.name:(x.nameTamil||x.name);
+  const [dt,setDt]=useState(TODAY);
+
+  const DAYS=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+  const DAY_TA={sunday:"ஞாயிறு",monday:"திங்கள்",tuesday:"செவ்வாய்",wednesday:"புதன்",thursday:"வியாழன்",friday:"வெள்ளி",saturday:"சனி"};
+  const dayKey=DAYS[new Date(dt).getDay()];
+  const dayLabel=lang==="en"?dayKey.charAt(0).toUpperCase()+dayKey.slice(1):DAY_TA[dayKey];
+
+  const SLOTS=[
+    {key:"morning",label:t("Morning","காலை"),icon:"🌅"},
+    {key:"afternoon",label:t("Afternoon","மதியம்"),icon:"☀️"},
+    {key:"evening",label:t("Evening","மாலை"),icon:"🌙"},
+  ];
+
+  // Build: temple -> slot -> [{item,qty}]
+  const templeSections=poojaTemples.map(tm=>{
+    const slots=SLOTS.map(sl=>{
+      const items=poojaItems
+        .map(pi=>{
+          const dd=tm.schedule?.[pi.id]?.[dayKey]||{};
+          const qty=+dd[sl.key]||0;
+          return qty>0?{item:pi,qty}:null;
+        })
+        .filter(Boolean);
+      return{...sl,items};
+    }).filter(sl=>sl.items.length>0);
+    const total=slots.reduce((s,sl)=>s+sl.items.reduce((s2,x)=>s2+x.qty,0),0);
+    return{temple:tm,slots,total};
+  }).filter(s=>s.slots.length>0);
+
+  const occSections=occOrders.filter(o=>o.date===dt).map(o=>({
+    order:o,
+    items:(o.items||[]).map(it=>{
+      const pi=poojaItems.find(x=>x.id===it.itemId);
+      return pi?{item:pi,qty:+it.qty||0}:null;
+    }).filter(Boolean),
+  }));
+
+  const hasData=templeSections.length>0||occSections.length>0;
+
+  const round2=v=>Math.round((+v||0)*100)/100;
+
+  const doPrint=()=>{
+    let blockNo=0;
+    const templeBlocks=templeSections.map(({temple,slots,total})=>{
+      blockNo++;
+      const slotHtml=slots.map(sl=>{
+        const rows=sl.items.map((x,i)=>`<tr>
+          <td style="width:26px;text-align:right;padding:3px 6px 3px 0;color:#666;font-size:12px">${i+1}</td>
+          <td style="padding:3px 4px;font-size:13px;font-weight:500">${n(x.item)}</td>
+          <td style="padding:3px 0 3px 4px;text-align:right;font-size:13px;font-weight:700;white-space:nowrap">${round2(x.qty)} ${x.item.unit}</td>
+        </tr>`).join("");
+        return `<div style="margin:6px 0 8px 0">
+          <div style="font-size:12px;font-weight:700;color:#555;margin-bottom:3px">${sl.icon} ${sl.label}</div>
+          <table style="width:100%;border-collapse:collapse"><tbody>${rows}</tbody></table>
+        </div>`;
+      }).join("");
+      return `<div style="margin-bottom:14px">
+        <div style="display:flex;align-items:baseline;border-bottom:2px solid #000;padding-bottom:5px;margin-bottom:4px">
+          <span style="font-size:13px;font-weight:600;color:#555;margin-right:6px">${blockNo}</span>
+          <span style="font-size:16px;font-weight:700;flex:1">🛕 ${n(temple)}</span>
+          <span style="font-size:15px;font-weight:800">${round2(total)} ${t("items total","மொத்தம்")}</span>
+        </div>
+        ${slotHtml}
+      </div>`;
+    }).join("");
+
+    const occBlocks=occSections.map(({order,items})=>{
+      blockNo++;
+      const rows=items.map((x,i)=>`<tr>
+        <td style="width:26px;text-align:right;padding:3px 6px 3px 0;color:#666;font-size:12px">${i+1}</td>
+        <td style="padding:3px 4px;font-size:13px;font-weight:500">${n(x.item)}</td>
+        <td style="padding:3px 0 3px 4px;text-align:right;font-size:13px;font-weight:700;white-space:nowrap">${round2(x.qty)} ${x.item.unit}</td>
+      </tr>`).join("");
+      const nm=lang==="en"?order.templateName:(order.templateNameTamil||order.templateName);
+      return `<div style="margin-bottom:14px">
+        <div style="display:flex;align-items:baseline;border-bottom:2px solid #6B3FA0;padding-bottom:5px;margin-bottom:4px">
+          <span style="font-size:13px;font-weight:600;color:#555;margin-right:6px">${blockNo}</span>
+          <span style="font-size:16px;font-weight:700;flex:1;color:#6B3FA0">🕉️ ${nm}</span>
+        </div>
+        <table style="width:100%;border-collapse:collapse"><tbody>${rows}</tbody></table>
+      </div>`;
+    }).join("");
+
+    printHTML(
+      t("Items to Send","அனுப்ப வேண்டிய பொருட்கள்")+" — "+dayLabel+" "+dt,
+      `<p style="font-size:12px;color:#555;margin:0 0 14px">${t("Date","தேதி")}: ${dt} (${dayLabel})</p>${templeBlocks}${occBlocks}`
+    );
+  };
+
+  const doExport=()=>{
+    const rows=[];
+    templeSections.forEach(({temple,slots})=>{
+      rows.push({Section:"🛕 "+n(temple),Slot:"",Item:"",Qty:"",Unit:""});
+      slots.forEach(sl=>{
+        sl.items.forEach(x=>rows.push({Section:"",Slot:sl.label,Item:n(x.item),Qty:round2(x.qty),Unit:x.item.unit}));
+      });
+      rows.push({Section:"",Slot:"",Item:"",Qty:"",Unit:""});
+    });
+    occSections.forEach(({order,items})=>{
+      const nm=lang==="en"?order.templateName:(order.templateNameTamil||order.templateName);
+      rows.push({Section:"🕉️ "+nm,Slot:"",Item:"",Qty:"",Unit:""});
+      items.forEach(x=>rows.push({Section:"",Slot:"",Item:n(x.item),Qty:round2(x.qty),Unit:x.item.unit}));
+      rows.push({Section:"",Slot:"",Item:"",Qty:"",Unit:""});
+    });
+    exportXlsxSheets("items_to_send_"+dt+".xlsx",[{name:"Items to Send",data:rows}]);
+  };
+
+  return(
+    <div>
+      <ReportBar onPrint={hasData?doPrint:null} onExport={hasData?doExport:null} lang={lang} setLang={setLang}>
+        <div>
+          <label style={css.lbl}>{t("Date","தேதி")}</label>
+          <input type="date" style={{...css.inp,width:160}} value={dt} onChange={e=>setDt(e.target.value)}/>
+        </div>
+        <div style={{fontSize:11,color:P.muted,paddingBottom:6,fontWeight:600}}>📅 {dayLabel}</div>
+        <button style={{...css.btn("ghost",true),borderColor:P.success,color:P.success}} onClick={()=>{setQuickDate(dt);setPage("pooja_weekshop");}}>
+          🛒 {t("Purchase for this date","இந்த தேதிக்கு கொள்முதல்")}
+        </button>
+      </ReportBar>
+      <div style={{fontSize:11,color:P.muted,marginBottom:14}}>
+        {t("Everything scheduled to go out on this date — recurring temple items plus any Moolam/Pradosham/etc. occasion orders that fall on it.","இந்த தேதியில் அனுப்பப்பட வேண்டிய அனைத்தும் — வழக்கமான கோவில் பொருட்கள் மற்றும் சிறப்பு நாள் ஆர்டர்கள்.")}
+      </div>
+
+      {!hasData?(
+        <div style={{color:P.muted,textAlign:"center",padding:32}}>{t("Nothing scheduled to send on this date.","இந்த தேதியில் எதுவும் அனுப்ப வேண்டியதில்லை.")}</div>
+      ):(
+        <>
+          {templeSections.map(({temple,slots,total})=>(
+            <div key={temple.id} style={{...css.card,marginBottom:16,border:"1px solid #333"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,color:P.deepBrown}}>🛕 {n(temple)}</span>
+                </div>
+                <span style={{...css.badge(P.saffron),fontSize:12,padding:"4px 12px"}}>{round2(total)} {t("items total","மொத்தம்")}</span>
+              </div>
+              {slots.map(sl=>(
+                <div key={sl.key} style={{marginBottom:10}}>
+                  <div style={{fontSize:12,fontWeight:700,color:P.muted,marginBottom:4}}>{sl.icon} {sl.label}</div>
+                  <div style={{border:"1px solid #DDD",borderRadius:4,overflow:"hidden"}}>
+                    {sl.items.map((x,i)=>(
+                      <div key={x.item.id} style={{display:"flex",alignItems:"baseline",padding:"5px 10px",
+                        background:i%2===1?"#F5F5F5":"white",borderBottom:"1px solid #E8E8E8"}}>
+                        <span style={{fontSize:11,color:"#888",width:22,flexShrink:0,textAlign:"right",marginRight:8}}>{i+1}</span>
+                        <span style={{fontSize:13,fontWeight:500,color:"#111",flex:1}}>{n(x.item)}</span>
+                        <span style={{fontSize:13,fontWeight:700,color:"#111"}}>{round2(x.qty)} {x.item.unit}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+
+          {occSections.map(({order,items})=>{
+            const nm=lang==="en"?order.templateName:(order.templateNameTamil||order.templateName);
+            return(
+              <div key={order.id} style={{...css.card,marginBottom:16,border:"1px solid "+P.purple+"55"}}>
+                <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,color:P.purple,marginBottom:10}}>
+                  🕉️ {nm}
+                </div>
+                <div style={{border:"1px solid #DDD",borderRadius:4,overflow:"hidden"}}>
+                  {items.map((x,i)=>(
+                    <div key={x.item.id} style={{display:"flex",alignItems:"baseline",padding:"5px 10px",
+                      background:i%2===1?"#F5F5F5":"white",borderBottom:"1px solid #E8E8E8"}}>
+                      <span style={{fontSize:11,color:"#888",width:22,flexShrink:0,textAlign:"right",marginRight:8}}>{i+1}</span>
+                      <span style={{fontSize:13,fontWeight:500,color:"#111",flex:1}}>{n(x.item)}</span>
+                      <span style={{fontSize:13,fontWeight:700,color:"#111"}}>{round2(x.qty)} {x.item.unit}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
     </div>
   );
 }
@@ -4201,14 +4496,12 @@ function PoojaWeeklyIssuePage({ctx}){
 }
 
 function PoojaWeeklyShopPage({ctx}){
-  const {poojaTemples,poojaItems,occOrders,lang:gLang}=ctx;
+  const {poojaTemples,poojaItems,occOrders,quickDate,lang:gLang}=ctx;
   const [lang,setLang]=useState(gLang);
   const t=(en,ta)=>lang==="en"?en:ta;
   const n=(x)=>lang==="en"?x.name:(x.nameTamil||x.name);
-  const [fromDate,setFromDate]=useState(TODAY);
-  const [toDate,setToDate]=useState(()=>{
-    const d=new Date(TODAY); d.setDate(d.getDate()+6); return d.toISOString().slice(0,10);
-  });
+  const [fromDate,setFromDate]=useState(quickDate||TODAY);
+  const [toDate,setToDate]=useState(quickDate||TODAY);
 
   const DAYS=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
 
@@ -4547,7 +4840,7 @@ function OccOrdersPage({ctx}){
 
   return(
     <div>
-      <div style={{...css.card,background:"#F3F0FF",border:"1px solid #C4B5FD"}}>
+      <div data-tour="occ-bulk-create" style={{...css.card,background:"#F3F0FF",border:"1px solid #C4B5FD"}}>
         <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:P.purple,marginBottom:8}}>
           ⚡ {t("Bulk Create — Known 2026 Dates","குவிப்பு உருவாக்கம் — 2026 தேதிகள்")}
         </div>
