@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useKitchenData } from "./useKitchenData.js";
 import { RTYPE_SEED } from "./seeds.js";
 import * as XLSX from "xlsx";
-import Joyride, { STATUS, ACTIONS, EVENTS } from "react-joyride";
 function PostIssues({ctx,date,onClose}){
   const {orders,recipes,ingredients,setInventory,lang}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
@@ -158,7 +157,7 @@ const css = {
   th:{background:P.nav,color:"#F5DEB3",padding:"8px 10px",textAlign:"left",fontSize:11,fontWeight:600,whiteSpace:"nowrap"},
   td:{padding:"8px 10px",borderBottom:`1px solid ${P.highlight}`,color:P.deepBrown,verticalAlign:"middle"},
   btn:(v="primary",sm)=>({
-    padding:sm?"4px 10px":"7px 14px",borderRadius:7,border:"none",cursor:"pointer",
+    padding:sm?"4px 10px":"7px 14px",borderRadius:7,cursor:"pointer",
     fontSize:sm?11:12,fontWeight:600,
     background:v==="primary"?P.saffron:v==="danger"?P.danger:v==="success"?P.success:v==="info"?P.info:v==="ghost"?"transparent":"#F0E6D3",
     color:["primary","danger","success","info"].includes(v)?P.white:P.deepBrown,
@@ -409,89 +408,11 @@ function App(){
     ingredients,setIngredients,recipes,setRecipes,
     orders,setOrders,inventory,setInventory,locations,setLocations,recipeTypes,setRecipeTypes,
     poojaItems,setPoojaItems,poojaTemples,setPoojaTemples,poojaDels,setPoojaDels,
-    occTemplates,setOccTemplates,occOrders,setOccOrders,
-    tourCompleted,markTourCompleted} = useKitchenData();
+    occTemplates,setOccTemplates,occOrders,setOccOrders} = useKitchenData();
 
   const [quickDate,setQuickDate]=useState(TODAY);
   const ctx={lang,ingredients,setIngredients,recipes,setRecipes,locations,setLocations,orders,setOrders,inventory,setInventory,recipeTypes,setRecipeTypes,setModal,poojaItems,setPoojaItems,poojaTemples,setPoojaTemples,poojaDels,setPoojaDels,occTemplates,setOccTemplates,occOrders,setOccOrders,setPage,quickDate,setQuickDate};
   const t=(en,ta)=>lang==="en"?en:ta;
-
-  // ── First-time interactive tour (React Joyride) ─────────────────────────
-  const [tourRun,setTourRun]=useState(false);
-  const [tourStepIndex,setTourStepIndex]=useState(0);
-  const tourAutoStarted=useRef(false);
-
-  const tourSteps=useMemo(()=>[
-    {target:"[data-tour='tour-logo']",page:"ingredients",disableBeacon:true,
-      content:t("Welcome to Koviloor Kitchen! Let's take a quick tour of the major features.","கோவிலூர் கிச்சனுக்கு வரவேற்கிறோம்! முக்கிய அம்சங்களை சுற்றிப் பார்ப்போம்.")},
-    {target:"[data-tour='nav-ingredients']",page:"ingredients",
-      content:t("Ingredients — your master list of raw materials with cost, category, and unit.","பொருட்கள் — மூலப்பொருட்களின் அடிப்படை பட்டியல்.")},
-    {target:"[data-tour='add-ingredient']",page:"ingredients",
-      content:t("Add a new ingredient here anytime. Import/Export Excel buttons are above for bulk work.","புதிய பொருளை இங்கே சேர்க்கலாம்.")},
-    {target:"[data-tour='ing-substitute']",page:"ingredients",
-      content:t("Use Substitute to bulk-replace one ingredient with another across every recipe — useful when prices change.","விலை மாறும்போது ஒரு பொருளை மற்றொன்றால் மாற்ற இதைப் பயன்படுத்தவும்.")},
-    {target:"[data-tour='nav-recipes']",page:"recipes",
-      content:t("Recipes — every dish, its ingredients, cost, and prep steps live here.","சமையல் குறிப்புகள் — உணவுகளும் அவற்றின் பொருட்களும்.")},
-    {target:"[data-tour='add-recipe']",page:"recipes",
-      content:t("Add a brand-new recipe here. Existing recipes can be duplicated with one click too.","புதிய சமையல் குறிப்பை இங்கே சேர்க்கவும்.")},
-    {target:"[data-tour='nav-orders']",page:"orders",
-      content:t("Orders — what's being cooked, for whom, and when.","ஆர்டர்கள் — என்ன சமைக்கப்படுகிறது, யாருக்கு, எப்போது.")},
-    {target:"[data-tour='new-order']",page:"orders",
-      content:t("Create a new order here — pick location, session, dishes, and quantities.","புதிய ஆர்டரை இங்கே உருவாக்கவும்.")},
-    {target:"[data-tour='duplicate-day']",page:"orders",
-      content:t("Already planned a similar day? Duplicate all of that day's orders straight to a new date.","ஒத்த நாளை நகலெடுத்து புதிய தேதிக்கு பயன்படுத்தலாம்.")},
-    {target:"[data-tour='nav-reports']",page:"orders",
-      content:t("Reports — Dish-wise Ingredients, Shopping Lists, Weekly Menu, Cost Analysis, Compare Recipes, and more live in this section.","அறிக்கைகள் — பொருட்கள், கொள்முதல் பட்டியல், செலவு பகுப்பாய்வு போன்றவை இங்கே.")},
-    {target:"[data-tour='nav-inventory']",page:"orders",
-      content:t("Inventory — track purchases, issues, stock balance, and cost deviation alerts.","சரக்கு மேலாண்மை — கொள்முதல், வழங்கல், இருப்பு.")},
-    {target:"[data-tour='nav-pooja']",page:"orders",
-      content:t("Pooja Material — items, temple schedules, dispatch, and purchase planning for temple issues.","பூஜை பொருள் — கோவில் அட்டவணை மற்றும் கொள்முதல்.")},
-    {target:"[data-tour='pooja-add-item']",page:"pooja_items",
-      content:t("Add pooja items here — these feed both the temple weekly schedule and occasion templates.","பூஜை பொருட்களை இங்கே சேர்க்கவும்.")},
-    {target:"[data-tour='nav-occasions']",page:"pooja_items",
-      content:t("Temple Occasions — templates for Moolam, Pradosham, Ekadasi etc., turned into dated orders.","கோவில் சிறப்பு நாட்கள் — மூலம், பிரதோஷம் போன்றவற்றுக்கான மாதிரிகள்.")},
-    {target:"[data-tour='occ-bulk-create']",page:"occ_orders",
-      content:t("Bulk-create known occasion dates for the rest of the year in one click, matched to your templates.","இந்த வருடத்திற்கான தேதிகளை ஒரே கிளிக்கில் உருவாக்கவும்.")},
-    {target:"[data-tour='lang-select']",page:"occ_orders",
-      content:t("Switch the whole app between English and Tamil anytime from here.","இங்கிருந்து மொழியை மாற்றலாம்.")},
-    {target:"[data-tour='save-btn']",page:"occ_orders",
-      content:t("Changes auto-save, but you can force an immediate save here if you're about to close the tab.","மாற்றங்கள் தானாக சேமிக்கப்படும்; உடனடியாக சேமிக்கவும் இங்கே முடியும்.")},
-    {target:"[data-tour='nav-help_tour']",page:"occ_orders",
-      content:t("You can replay this tour anytime from Help → Take Tour. That's it — happy cooking!","இந்த சுற்றுப்பயணத்தை Help → Take Tour-இல் இருந்து மீண்டும் பார்க்கலாம்.")},
-  ],[lang]);
-
-  const startTour=()=>{
-    setPage("ingredients");
-    setTourStepIndex(0);
-    setTimeout(()=>setTourRun(true),300);
-  };
-
-  useEffect(()=>{
-    if(loaded&&tourCompleted===false&&!tourAutoStarted.current){
-      tourAutoStarted.current=true;
-      setTimeout(()=>{setPage("ingredients");setTourStepIndex(0);setTourRun(true);},900);
-    }
-  },[loaded,tourCompleted]);
-
-  const handleJoyrideCallback=(data)=>{
-    const {action,index,status,type}=data;
-    if(status===STATUS.FINISHED||status===STATUS.SKIPPED){
-      setTourRun(false);
-      if(!tourCompleted)markTourCompleted(true);
-      return;
-    }
-    if(type===EVENTS.STEP_AFTER||type===EVENTS.TARGET_NOT_FOUND){
-      const nextIndex=index+(action===ACTIONS.PREV?-1:1);
-      if(nextIndex<0||nextIndex>=tourSteps.length){setTourRun(false);return;}
-      const nextStep=tourSteps[nextIndex];
-      if(nextStep.page&&nextStep.page!==page){
-        setPage(nextStep.page);
-        setTimeout(()=>setTourStepIndex(nextIndex),350);
-      } else {
-        setTourStepIndex(nextIndex);
-      }
-    }
-  };
 
   const NAV=[
     {id:"ingredients",icon:"🧂",en:"Ingredients",ta:"பொருட்கள்"},
@@ -522,9 +443,6 @@ function App(){
       {id:"occ_orders",en:"Orders",ta:"ஆர்டர்கள்"},
       {id:"occ_purchase",en:"Purchase Planning",ta:"கொள்முதல் திட்டம்"},
     ]},
-    {id:"help",icon:"❓",en:"Help",ta:"உதவி",children:[
-      {id:"help_tour",en:"Take Tour",ta:"சுற்றுப்பயணம் தொடங்கு"},
-    ]},
   ];
   const flat=NAV.flatMap(n=>n.children?[n,...n.children]:[n]);
   const cur=flat.find(p=>p.id===page)||NAV[0];
@@ -532,25 +450,6 @@ function App(){
   if(!loaded) return(<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#FEF6E8",flexDirection:"column",gap:12}}><div style={{fontSize:32}}>🍛</div><div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:"#5C2A0A"}}>Koviloor Kitchen</div><div style={{fontSize:13,color:"#9B7355"}}>Loading from cloud...</div></div>);
   return (
     <div style={css.app}>
-      <Joyride
-        steps={tourSteps}
-        run={tourRun}
-        stepIndex={tourStepIndex}
-        callback={handleJoyrideCallback}
-        continuous
-        showProgress
-        showSkipButton
-        scrollToFirstStep
-        disableOverlayClose
-        locale={{back:t("Previous","முந்தையது"),next:t("Next","அடுத்தது"),skip:t("Skip","தவிர்"),last:t("Finish","முடி")}}
-        styles={{
-          options:{primaryColor:P.saffron,textColor:P.deepBrown,zIndex:10000,arrowColor:P.white,backgroundColor:P.white,width:Math.min(340,typeof window!=="undefined"?window.innerWidth-32:340)},
-          tooltip:{borderRadius:10,fontSize:13},
-          buttonNext:{background:P.saffron,borderRadius:7,padding:"7px 14px"},
-          buttonBack:{color:P.muted,marginRight:8},
-          buttonSkip:{color:P.muted},
-        }}
-      />
       <nav style={css.nav}>
         <div style={css.navTop} data-tour="tour-logo">
           <div style={{fontSize:26,marginBottom:4}}>🍛</div>
@@ -564,11 +463,7 @@ function App(){
                 <span>{n.icon}</span><span>{t(n.en,n.ta)}</span>
               </div>
               {n.children?.map(c=>(
-                <div key={c.id} style={css.navItem(page===c.id,true)} data-tour={"nav-"+c.id} href={"#"+c.id} onClick={e=>{
-                  e.preventDefault();
-                  if(c.id==="help_tour"){startTour();}
-                  else{setPage(c.id);}
-                }}>
+                <div key={c.id} style={css.navItem(page===c.id,true)} data-tour={"nav-"+c.id} href={"#"+c.id} onClick={e=>{e.preventDefault();setPage(c.id);}}>
                   <span style={{opacity:0.4}}>└</span><span>{t(c.en,c.ta)}</span>
                 </div>
               ))}
