@@ -225,6 +225,19 @@ function levenshtein(a,b){
 
 const TODAY=new Date().toISOString().slice(0,10);
 
+// ── Order naming convention: "<day><MonAbbr>" + session suffix (BF for Breakfast, SN for Snack) ──
+const MONTH_ABBR=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function genOrderName(dateStr,entries){
+  const d=new Date(dateStr);
+  const base=d.getDate()+MONTH_ABBR[d.getMonth()];
+  const sessions=[...new Set((entries||[]).map(e=>e.session))];
+  if(sessions.length===1){
+    if(sessions[0]==="Breakfast")return base+"BF";
+    if(sessions[0]==="Snack")return base+"SN";
+  }
+  return base; // Lunch, Dinner, or mixed sessions -> plain date
+}
+
 // ── Print utility ──────────────────────────────────────────────────────────────
 function printHTML(title, htmlContent, extraHead="") {
   const css=`
@@ -1695,9 +1708,13 @@ function OrdersPage({ctx}){
   const [dateQ,setDateQ]=useState("");
   const [nameQ,setNameQ]=useState("");
   const [dupOpen,setDupOpen]=useState(false);
+  const [dupMode,setDupMode]=useState("day"); // "day" | "range"
   const [dupFrom,setDupFrom]=useState(TODAY);
   const [dupTo,setDupTo]=useState(TODAY);
   const [dupSess,setDupSess]=useState("All");
+  const [dupRangeFrom,setDupRangeFrom]=useState(TODAY);
+  const [dupRangeTo,setDupRangeTo]=useState(TODAY);
+  const [dupRangeTarget,setDupRangeTarget]=useState(TODAY);
   const importFileRef=useRef();
   const [importMsg,setImportMsg]=useState("");
 
@@ -1757,7 +1774,9 @@ function OrdersPage({ctx}){
               if(idx>=0)mergedEntries[idx]={...mergedEntries[idx],qty:en.qty,baseQty:en.qty,basePax:en.basePax??mergedEntries[idx].basePax};
               else mergedEntries.push(en);
             });
-            next[existingIdx]={...existing,entries:mergedEntries};
+            const nameNeedsGuruMark=isGuru&&!existing.name.includes("🕉️");
+            next[existingIdx]={...existing,entries:mergedEntries,
+              name:nameNeedsGuruMark?"🕉️ "+t("Gurupooja Menu","குருபூஜை உணவு")+" — "+dateStr:existing.name};
             updated++;
           } else {
             const paxVal=entries.find(en=>en.basePax)?.basePax||"";
@@ -1806,12 +1825,42 @@ function OrdersPage({ctx}){
     source.forEach((o,i)=>{
       const entries=(o.entries||[]).filter(e=>dupSess==="All"||e.session===dupSess);
       if(!entries.length)return;
-      copies.push({...o,id:Date.now()+i,date:dupTo,entries:entries.map(e=>({...e}))});
+      const newEntries=entries.map(e=>({...e}));
+      copies.push({...o,id:Date.now()+i,date:dupTo,name:genOrderName(dupTo,newEntries),entries:newEntries});
     });
     if(!copies.length){alert(t("No entries found for that date and session.","அந்த தேதி / அமர்வுக்கு பதிவுகள் இல்லை."));return;}
     setOrders(p=>[...p,...copies]);
     setDupOpen(false);
     alert(copies.length+" "+t("order(s) duplicated to","ஆர்டர்(கள்) நகலெடுக்கப்பட்டன")+" "+dupTo+(dupSess!=="All"?" ("+dupSess+")":""));
+  };
+
+  const dupRangeDayCount=(()=>{
+    const s=new Date(dupRangeFrom),e=new Date(dupRangeTo);
+    if(s>e)return 0;
+    return Math.round((e-s)/86400000)+1;
+  })();
+  const dupRangeMatchCount=(()=>{
+    const s=new Date(dupRangeFrom),e=new Date(dupRangeTo);
+    if(s>e)return 0;
+    return orders.filter(o=>!o.isTemplate&&new Date(o.date)>=s&&new Date(o.date)<=e).length;
+  })();
+
+  const shiftDateRange=()=>{
+    if(!dupRangeFrom||!dupRangeTo||!dupRangeTarget)return;
+    const s=new Date(dupRangeFrom),e=new Date(dupRangeTo);
+    if(s>e){alert(t("From date must be before To date.","இருந்து தேதி வரை தேதிக்கு முன் இருக்க வேண்டும்."));return;}
+    const offsetMs=new Date(dupRangeTarget)-s;
+    const source=orders.filter(o=>!o.isTemplate&&new Date(o.date)>=s&&new Date(o.date)<=e);
+    if(!source.length){alert(t("No orders found in that date range.","அந்த தேதி வரம்பில் ஆர்டர் இல்லை."));return;}
+    const copies=source.map((o,i)=>{
+      const newDate=new Date(new Date(o.date).getTime()+offsetMs).toISOString().slice(0,10);
+      const newEntries=(o.entries||[]).map(en=>({...en}));
+      return{...o,id:Date.now()+i,date:newDate,name:genOrderName(newDate,newEntries),entries:newEntries};
+    });
+    setOrders(p=>[...p,...copies]);
+    setDupOpen(false);
+    const lastDate=copies.reduce((mx,c)=>c.date>mx?c.date:mx,copies[0].date);
+    alert(copies.length+" "+t("order(s) duplicated, shifted to start","ஆர்டர்(கள்) நகலெடுக்கப்பட்டன, தொடங்கும்")+" "+dupRangeTarget+" ("+t("through","வரை")+" "+lastDate+")");
   };
 
   return(
@@ -1839,32 +1888,66 @@ function OrdersPage({ctx}){
       </div>
 
       {dupOpen&&(
-        <div style={{display:"flex",gap:10,alignItems:"flex-end",background:P.highlight,padding:12,borderRadius:8,marginBottom:14,flexWrap:"wrap"}}>
-          <div>
-            <label style={css.lbl}>{t("Copy orders from","இதிலிருந்து நகலெடு")}</label>
-            <input type="date" style={{...css.inp,width:150}} value={dupFrom} onChange={e=>setDupFrom(e.target.value)}/>
+        <div style={{background:P.highlight,padding:12,borderRadius:8,marginBottom:14}}>
+          <div style={{display:"flex",gap:6,marginBottom:10}}>
+            <button style={css.btn(dupMode==="day"?"primary":"ghost",true)} onClick={()=>setDupMode("day")}>{t("Single Day","ஒரு நாள்")}</button>
+            <button style={css.btn(dupMode==="range"?"primary":"ghost",true)} onClick={()=>setDupMode("range")}>{t("Date Range","தேதி வரம்பு")}</button>
           </div>
-          <div>
-            <label style={css.lbl}>{t("Session","அமர்வு")}</label>
-            <div style={{display:"flex",gap:4}}>
-              {["All",...SESSIONS].map(s=>(
-                <button key={s} style={{...css.btn(dupSess===s?"primary":"ghost",true),
-                  borderColor:s!=="All"?(SCOLOR[s]||P.muted):"#DCC88A",
-                  color:dupSess===s?"white":(s!=="All"?SCOLOR[s]:P.deepBrown),
-                  background:dupSess===s?(SCOLOR[s]||P.saffron):"transparent",
-                }} onClick={()=>setDupSess(s)}>{s==="All"?t("All","அனைத்தும்"):s}</button>
-              ))}
+
+          {dupMode==="day"?(
+            <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
+              <div>
+                <label style={css.lbl}>{t("Copy orders from","இதிலிருந்து நகலெடு")}</label>
+                <input type="date" style={{...css.inp,width:150}} value={dupFrom} onChange={e=>setDupFrom(e.target.value)}/>
+              </div>
+              <div>
+                <label style={css.lbl}>{t("Session","அமர்வு")}</label>
+                <div style={{display:"flex",gap:4}}>
+                  {["All",...SESSIONS].map(s=>(
+                    <button key={s} style={{...css.btn(dupSess===s?"primary":"ghost",true),
+                      borderColor:s!=="All"?(SCOLOR[s]||P.muted):"#DCC88A",
+                      color:dupSess===s?"white":(s!=="All"?SCOLOR[s]:P.deepBrown),
+                      background:dupSess===s?(SCOLOR[s]||P.saffron):"transparent",
+                    }} onClick={()=>setDupSess(s)}>{s==="All"?t("All","அனைத்தும்"):s}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label style={css.lbl}>{t("To date","புதிய தேதி")}</label>
+                <input type="date" style={{...css.inp,width:150}} value={dupTo} onChange={e=>setDupTo(e.target.value)}/>
+              </div>
+              <div style={{fontSize:11,color:P.muted,paddingBottom:8}}>
+                {dupMatchCount} {t("entry(ies) found for that date/session","பதிவுகள் கிடைத்தன")}
+              </div>
+              <button style={css.btn("success")} onClick={duplicateDay}>✓ {t("Duplicate","நகலெடு")}</button>
+              <button style={css.btn("ghost")} onClick={()=>setDupOpen(false)}>{t("Cancel","ரத்து")}</button>
             </div>
-          </div>
-          <div>
-            <label style={css.lbl}>{t("To date","புதிய தேதி")}</label>
-            <input type="date" style={{...css.inp,width:150}} value={dupTo} onChange={e=>setDupTo(e.target.value)}/>
-          </div>
-          <div style={{fontSize:11,color:P.muted,paddingBottom:8}}>
-            {dupMatchCount} {t("entry(ies) found for that date/session","பதிவுகள் கிடைத்தன")}
-          </div>
-          <button style={css.btn("success")} onClick={duplicateDay}>✓ {t("Duplicate","நகலெடு")}</button>
-          <button style={css.btn("ghost")} onClick={()=>setDupOpen(false)}>{t("Cancel","ரத்து")}</button>
+          ):(
+            <div>
+              <div style={{fontSize:11,color:P.muted,marginBottom:8}}>
+                {t("Copies every order in the source range to a new range, keeping the same day-to-day pattern (locations, sessions, dishes, quantities). E.g. repeat your last 2 weeks' plan as the next 2 weeks.","மூல வரம்பின் ஒவ்வொரு ஆர்டரையும் புதிய வரம்புக்கு நகலெடுக்கும்.")}
+              </div>
+              <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
+                <div>
+                  <label style={css.lbl}>{t("Source: From","மூலம்: இருந்து")}</label>
+                  <input type="date" style={{...css.inp,width:150}} value={dupRangeFrom} onChange={e=>setDupRangeFrom(e.target.value)}/>
+                </div>
+                <div>
+                  <label style={css.lbl}>{t("Source: To","மூலம்: வரை")}</label>
+                  <input type="date" style={{...css.inp,width:150}} value={dupRangeTo} onChange={e=>setDupRangeTo(e.target.value)}/>
+                </div>
+                <div>
+                  <label style={css.lbl}>{t("New start date","புதிய தொடக்க தேதி")}</label>
+                  <input type="date" style={{...css.inp,width:150}} value={dupRangeTarget} onChange={e=>setDupRangeTarget(e.target.value)}/>
+                </div>
+                <div style={{fontSize:11,color:P.muted,paddingBottom:8}}>
+                  {dupRangeDayCount} {t("day(s) in source","நாட்கள்")}, {dupRangeMatchCount} {t("order(s) found","ஆர்டர்கள் கிடைத்தன")}
+                </div>
+                <button style={css.btn("success")} onClick={shiftDateRange}>✓ {t("Duplicate Range","வரம்பை நகலெடு")}</button>
+                <button style={css.btn("ghost")} onClick={()=>setDupOpen(false)}>{t("Cancel","ரத்து")}</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
