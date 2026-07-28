@@ -5136,6 +5136,64 @@ function InvPage({ctx}){
   const n=(x)=>lang==="en"?x.name:x.nameTamil;
   const [tab,setTab]=useState("balance");
   const [q,setQ]=useState("");
+  const openStockRef=useRef();
+  const [openStockDate,setOpenStockDate]=useState(TODAY);
+  const [openStockMsg,setOpenStockMsg]=useState("");
+
+  const downloadOpeningStockTemplate=()=>{
+    const data=ingredients.map(ing=>({
+      Ingredient:ing.name,
+      Unit:ing.unit,
+      "Opening Qty":"",
+      "Cost per Unit":ing.normCost||"",
+    }));
+    const ws=XLSX.utils.json_to_sheet(data);
+    ws["!cols"]=[{wch:30},{wch:8},{wch:12},{wch:14}];
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Opening Stock");
+    XLSX.writeFile(wb,"opening_stock_template.xlsx");
+  };
+
+  const importOpeningStock=e=>{
+    const file=e.target.files[0]; if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const wb=XLSX.read(ev.target.result,{type:"binary"});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+      // Accepts either the Opening Stock template ("Opening Qty") or an exported
+      // Shopping List file ("In Stock") — category header rows have no Ingredient and get skipped.
+      const getQty=r=>{
+        const v=r["Opening Qty"]!==""?r["Opening Qty"]:r["In Stock"];
+        return +v||0;
+      };
+      const valid=rows.filter(r=>(r.Ingredient+"").trim()&&getQty(r)>0);
+      if(!valid.length){alert("No valid rows found. Fill 'Opening Qty' (or 'In Stock', if using a Shopping List export) for at least one ingredient.");return;}
+
+      let matched=0; const unmatched=[];
+      setInventory(prev=>{
+        let purchases=[...prev.purchases];
+        valid.forEach(r=>{
+          const nameLC=(r.Ingredient+"").trim().toLowerCase();
+          const ing=ingredients.find(x=>x.name.toLowerCase()===nameLC||(x.nameTamil||"").toLowerCase()===nameLC);
+          if(!ing){unmatched.push(r.Ingredient);return;}
+          matched++;
+          const qty=getQty(r);
+          const cpu=r["Cost per Unit"]?+r["Cost per Unit"]:(ing.normCost||0);
+          const existingIdx=purchases.findIndex(p=>p.source==="opening_stock"&&p.iid===ing.id);
+          const rec={id:existingIdx>=0?purchases[existingIdx].id:Date.now()+ing.id,iid:ing.id,date:openStockDate,
+            qty,unit:ing.unit,cpu,supplier:"Opening Stock",note:"Opening stock entry",source:"opening_stock"};
+          if(existingIdx>=0)purchases[existingIdx]=rec;
+          else purchases.push(rec);
+        });
+        return{...prev,purchases};
+      });
+      setOpenStockMsg(matched+" "+t("ingredient(s) set as opening stock","பொருட்கள் தொடக்க இருப்பாக அமைக்கப்பட்டன")+
+        (unmatched.length?", "+unmatched.length+" "+t("not matched","பொருந்தவில்லை")+": "+unmatched.slice(0,6).join(", "):""));
+    };
+    reader.readAsBinaryString(file);
+    e.target.value="";
+  };
 
   const getBal=iid=>{
     const p=inventory.purchases.filter(x=>x.iid===iid).reduce((s,x)=>s+x.qty,0);
@@ -5209,6 +5267,27 @@ function InvPage({ctx}){
           {tab==="issues"&&<button style={css.btn("info",true)} onClick={()=>setModal({type:"postIssues",date:TODAY})}>📦 {t("Post from Order","ஆர்டரிலிருந்து")}</button>}
         </div>
       </div>
+
+      {tab==="purchases"&&(
+        <div style={{...css.card,background:"#FFF8EC",border:"1px solid #F5D76E",marginBottom:14}}>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:P.deepBrown,marginBottom:8}}>
+            📦 {t("Opening Stock (one-time setup)","தொடக்க இருப்பு (ஒரு முறை அமைப்பு)")}
+          </div>
+          <div style={{fontSize:11,color:P.muted,marginBottom:10}}>
+            {t("Download the template — it's pre-filled with every ingredient and its normative cost. Fill in Opening Qty for whatever you're holding today, then import. Already have a Shopping List export handy? You can upload that directly too — just fill in its 'In Stock' column instead. Re-importing updates the same opening-stock entry rather than duplicating it.","டெம்ப்ளேட்டை பதிவிறக்கவும் அல்லது ஏற்கனவே உள்ள Shopping List கோப்பையும் பயன்படுத்தலாம் — 'In Stock' நெடுவரிசையை நிரப்பவும்.")}
+          </div>
+          <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
+            <button style={css.btn("ghost",true)} onClick={downloadOpeningStockTemplate}>📋 {t("Download Template","டெம்ப்ளேட் பதிவிறக்கு")}</button>
+            <div>
+              <label style={css.lbl}>{t("As of Date","தேதி")}</label>
+              <input type="date" style={{...css.inp,width:150}} value={openStockDate} onChange={e=>setOpenStockDate(e.target.value)}/>
+            </div>
+            <button style={css.btn("success",true)} onClick={()=>openStockRef.current.click()}>📤 {t("Import Opening Stock","இறக்கு")}</button>
+            <input ref={openStockRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importOpeningStock}/>
+          </div>
+          {openStockMsg&&<div style={{fontSize:12,color:"#166534",fontWeight:600,marginTop:10}}>✓ {openStockMsg}</div>}
+        </div>
+      )}
 
       {/* ── BALANCE ── */}
       {tab==="balance"&&(
