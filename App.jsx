@@ -5164,8 +5164,8 @@ function InvPage({ctx}){
       // Accepts either the Opening Stock template ("Opening Qty") or an exported
       // Shopping List file ("In Stock") — category header rows have no Ingredient and get skipped.
       const getQty=r=>{
-        const v=r["Opening Qty"]!==""?r["Opening Qty"]:r["In Stock"];
-        return +v||0;
+        const raw=(r["Opening Qty"]!==undefined&&r["Opening Qty"]!=="")?r["Opening Qty"]:r["In Stock"];
+        return +raw||0;
       };
       const valid=rows.filter(r=>(r.Ingredient+"").trim()&&getQty(r)>0);
       if(!valid.length){alert("No valid rows found. Fill 'Opening Qty' (or 'In Stock', if using a Shopping List export) for at least one ingredient.");return;}
