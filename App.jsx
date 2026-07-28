@@ -755,7 +755,7 @@ function IngsPage({ctx}){
               return(
                 <tr key={ing.id} style={{background:i%2===0?P.white:P.highlight}}>
                   <td style={{...css.td,width:28,color:P.muted}}>{i+1}</td>
-                  <td style={css.td}>{ed?<Inp val={ef.name} onChange={v=>setEf({...ef,name:v})} w={130}/>:<strong>{ing.name}</strong>}</td>
+                  <td style={css.td}>{ed?<Inp val={ef.name} onChange={v=>setEf({...ef,name:v})} w={130}/>:<strong style={ing.excludeFromShopping?{opacity:0.5,textDecoration:"line-through"}:{}}>{ing.name}</strong>}{!ed&&ing.excludeFromShopping&&<div style={{fontSize:9,color:P.danger}}>{t("not in shopping list","கொள்முதல் பட்டியலில் இல்லை")}</div>}</td>
                   <td style={{...css.td,fontFamily:"'Noto Sans Tamil',sans-serif"}}>{ed?<Inp val={ef.nameTamil} onChange={v=>setEf({...ef,nameTamil:v})} w={120} tamil/>:ing.nameTamil}</td>
                   <td style={css.td}>{ed?<Sel val={ef.category} onChange={v=>setEf({...ef,category:v})} opts={["grocery","vegetable","spice","cut","other"]}/>:<span style={css.badge(CATCOLOR[ing.category]||P.muted)}>{ing.category}</span>}</td>
                   <td style={css.td}>{ed?<Sel val={ef.unit} onChange={v=>setEf({...ef,unit:v})} opts={["kg","g","L","ml","nos"]}/>:ing.unit}</td>
@@ -765,7 +765,13 @@ function IngsPage({ctx}){
                   <td style={css.td}>{ed?<input type="number" style={{...css.inp,width:80}} value={ef.scalingBenchmark||""} onChange={e=>setEf({...ef,scalingBenchmark:e.target.value})}/>:(ing.scalingBenchmark?`${ing.scalingBenchmark}${ing.unit}`:<span style={{color:"#CCC"}}>—</span>)}</td>
                   <td style={css.td}><div style={{display:"flex",gap:4}}>
                     {ed?<><button style={css.btn("success",true)} onClick={saveEdit}>✓</button><button style={css.btn("ghost",true)} onClick={()=>setEditId(null)}>✕</button></>
-                    :<><button style={css.btn("info",true)} title={t("Where is this used?","எங்கு பயன்படுத்தப்படுகிறது?")} onClick={()=>setModal({type:"ingUsage",ing})}>👁</button><button style={css.btn("ghost",true)} onClick={()=>{setEditId(ing.id);setEf({...ing});}}>✏️</button><button style={css.btn("danger",true)} onClick={()=>setIngredients(p=>p.filter(x=>x.id!==ing.id))}>🗑</button></>}
+                    :<><button style={css.btn("info",true)} title={t("Where is this used?","எங்கு பயன்படுத்தப்படுகிறது?")} onClick={()=>setModal({type:"ingUsage",ing})}>👁</button>
+                    <button style={{...css.btn("ghost",true),...(ing.excludeFromShopping?{borderColor:P.danger,color:P.danger}:{})}}
+                      title={ing.excludeFromShopping?t("Excluded from Shopping List — click to include again","கொள்முதல் பட்டியலில் இல்லை — சேர்க்க கிளிக் செய்யவும்"):t("Exclude from Shopping List","கொள்முதல் பட்டியலில் இருந்து விலக்கு")}
+                      onClick={()=>setIngredients(p=>p.map(x=>x.id===ing.id?{...x,excludeFromShopping:!x.excludeFromShopping}:x))}>
+                      {ing.excludeFromShopping?"🚫":"🛒"}
+                    </button>
+                    <button style={css.btn("ghost",true)} onClick={()=>{setEditId(ing.id);setEf({...ing});}}>✏️</button><button style={css.btn("danger",true)} onClick={()=>setIngredients(p=>p.filter(x=>x.id!==ing.id))}>🗑</button></>}
                   </div></td>
                 </tr>
               );
@@ -2671,13 +2677,14 @@ function RepShop({ctx}){
   const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
   const [fromDate,setFromDate]=useState(TODAY);
   const [toDate,setToDate]=useState(TODAY);
-  // Ingredients to exclude from purchase order (AC pre-cut veg, Milk, etc.)
+  // Ingredients to exclude from purchase order (AC pre-cut veg, Milk, derived/intermediate items, etc.)
   const EXCLUDE_PREFIXES=["AC ","AC-"];
-  const EXCLUDE_NAMES=["milk","water for dal","water"];
-  const isExcluded=(name)=>{
-    const n=(name||"").toLowerCase().trim();
+  const EXCLUDE_NAMES=["milk","milk- milk","water for dal","water","tamarind juice","tomato juice","mavu-arisi mavu weight","mavu-ulunthu mavu wt"];
+  const isExcluded=(ing)=>{
+    if(ing.excludeFromShopping)return true;
+    const n=(ing.name||"").toLowerCase().trim();
     if(EXCLUDE_NAMES.includes(n))return true;
-    if(EXCLUDE_PREFIXES.some(p=>name.startsWith(p)))return true;
+    if(EXCLUDE_PREFIXES.some(p=>ing.name.startsWith(p)))return true;
     return false;
   };
 
@@ -2736,7 +2743,7 @@ function RepShop({ctx}){
     const allIngIds=[...new Set(sortedDates.flatMap(dt=>Object.keys(byDate[dt]).map(Number)))];
     const allIngs=allIngIds
       .map(id=>ingredients.find(x=>x.id===id)).filter(Boolean)
-      .filter(ing=>!isExcluded(ing.name))
+      .filter(ing=>!isExcluded(ing))
       .sort((a,b)=>CATS.indexOf(a.category)-CATS.indexOf(b.category)||a.name.localeCompare(b.name));
     return {byDate,combined,allIngs};
   };
