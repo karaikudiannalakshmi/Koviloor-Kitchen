@@ -5161,22 +5161,29 @@ function InvPage({ctx}){
       const wb=XLSX.read(ev.target.result,{type:"binary"});
       const ws=wb.Sheets[wb.SheetNames[0]];
       const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
-      // Accepts either the Opening Stock template ("Opening Qty") or an exported
-      // Shopping List file ("In Stock") — category header rows have no Ingredient and get skipped.
+      // Accepts multiple export formats: Opening Stock template ("Ingredient"/"Opening Qty"),
+      // Shopping List export ("Ingredient"/"In Stock"), or Purchase Order export ("Name"/"Available").
+      const getName=r=>{
+        const v=(r.Ingredient!==undefined&&r.Ingredient!=="")?r.Ingredient:r.Name;
+        return (v+"").trim();
+      };
       const getQty=r=>{
-        const raw=(r["Opening Qty"]!==undefined&&r["Opening Qty"]!=="")?r["Opening Qty"]:r["In Stock"];
+        let raw;
+        if(r["Opening Qty"]!==undefined&&r["Opening Qty"]!=="")raw=r["Opening Qty"];
+        else if(r["In Stock"]!==undefined&&r["In Stock"]!=="")raw=r["In Stock"];
+        else raw=r["Available"];
         return +raw||0;
       };
-      const valid=rows.filter(r=>(r.Ingredient+"").trim()&&getQty(r)>0);
-      if(!valid.length){alert("No valid rows found. Fill 'Opening Qty' (or 'In Stock', if using a Shopping List export) for at least one ingredient.");return;}
+      const valid=rows.filter(r=>getName(r)&&getQty(r)>0);
+      if(!valid.length){alert("No valid rows found. Fill 'Opening Qty' (or 'In Stock' / 'Available', depending on which export you're using) for at least one ingredient.");return;}
 
       let matched=0; const unmatched=[];
       setInventory(prev=>{
         let purchases=[...prev.purchases];
         valid.forEach(r=>{
-          const nameLC=(r.Ingredient+"").trim().toLowerCase();
+          const nameLC=getName(r).toLowerCase();
           const ing=ingredients.find(x=>x.name.toLowerCase()===nameLC||(x.nameTamil||"").toLowerCase()===nameLC);
-          if(!ing){unmatched.push(r.Ingredient);return;}
+          if(!ing){unmatched.push(getName(r));return;}
           matched++;
           const qty=getQty(r);
           const cpu=r["Cost per Unit"]?+r["Cost per Unit"]:(ing.normCost||0);
@@ -5199,6 +5206,72 @@ function InvPage({ctx}){
     const p=inventory.purchases.filter(x=>x.iid===iid).reduce((s,x)=>s+x.qty,0);
     const iss=inventory.issues.filter(x=>x.iid===iid).reduce((s,x)=>s+x.qty,0);
     return{p,iss,bal:p-iss};
+  };
+
+  const [reconcileDate,setReconcileDate]=useState(TODAY);
+  const [reconcileMsg,setReconcileMsg]=useState("");
+  const reconcileRef=useRef();
+
+  const importStockReconciliation=e=>{
+    const file=e.target.files[0]; if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const wb=XLSX.read(ev.target.result,{type:"binary"});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+      const getName=r=>{
+        const v=(r.Ingredient!==undefined&&r.Ingredient!=="")?r.Ingredient:r.Name;
+        return (v+"").trim();
+      };
+      // Prefers "Available" (Purchase Order export) then "In Stock" (Shopping List export)
+      // then "Opening Qty" — but unlike Opening Stock, a blank cell here means "no count taken",
+      // not zero, so it's skipped rather than treated as 0.
+      const getCount=r=>{
+        let raw;
+        if(r["Available"]!==undefined&&r["Available"]!=="")raw=r["Available"];
+        else if(r["In Stock"]!==undefined&&r["In Stock"]!=="")raw=r["In Stock"];
+        else if(r["Opening Qty"]!==undefined&&r["Opening Qty"]!=="")raw=r["Opening Qty"];
+        else return null;
+        const n=+raw;
+        return isNaN(n)?null:n;
+      };
+      const valid=rows.filter(r=>getName(r)&&getCount(r)!==null);
+      if(!valid.length){alert("No rows with a filled stock count found (Available / In Stock / Opening Qty column).");return;}
+
+      let up=0,down=0,unchanged=0; const unmatched=[];
+      setInventory(prev=>{
+        let purchases=[...prev.purchases];
+        let issues=[...prev.issues];
+        const balOf=iid=>{
+          const p=purchases.filter(x=>x.iid===iid).reduce((s,x)=>s+x.qty,0);
+          const iss=issues.filter(x=>x.iid===iid).reduce((s,x)=>s+x.qty,0);
+          return p-iss;
+        };
+        valid.forEach(r=>{
+          const nameLC=getName(r).toLowerCase();
+          const ing=ingredients.find(x=>x.name.toLowerCase()===nameLC||(x.nameTamil||"").toLowerCase()===nameLC);
+          if(!ing){unmatched.push(getName(r));return;}
+          const actual=getCount(r);
+          const current=balOf(ing.id);
+          const diff=+(actual-current).toFixed(4);
+          if(Math.abs(diff)<0.001){unchanged++;return;}
+          if(diff>0){
+            purchases.push({id:Date.now()+ing.id+Math.random(),iid:ing.id,date:reconcileDate,qty:diff,unit:ing.unit,
+              cpu:ing.normCost||0,supplier:"Stock Adjustment",note:"Reconciled to physical count",source:"stock_adjustment"});
+            up++;
+          } else {
+            issues.push({id:Date.now()+ing.id+Math.random(),iid:ing.id,date:reconcileDate,qty:-diff,unit:ing.unit,
+              note:"Reconciled to physical count",source:"stock_adjustment"});
+            down++;
+          }
+        });
+        return{...prev,purchases,issues};
+      });
+      setReconcileMsg(up+" "+t("increased","அதிகரிக்கப்பட்டது")+", "+down+" "+t("decreased","குறைக்கப்பட்டது")+", "+unchanged+" "+t("already matched","ஏற்கனவே பொருந்தியது")+
+        (unmatched.length?", "+unmatched.length+" "+t("not matched","பொருந்தவில்லை")+": "+unmatched.slice(0,6).join(", "):""));
+    };
+    reader.readAsBinaryString(file);
+    e.target.value="";
   };
 
   // Latest purchase price for an ingredient
@@ -5286,6 +5359,26 @@ function InvPage({ctx}){
             <input ref={openStockRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importOpeningStock}/>
           </div>
           {openStockMsg&&<div style={{fontSize:12,color:"#166534",fontWeight:600,marginTop:10}}>✓ {openStockMsg}</div>}
+        </div>
+      )}
+
+      {tab==="purchases"&&(
+        <div style={{...css.card,background:"#EFF6FF",border:"1px solid #93C5FD",marginBottom:14}}>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:P.deepBrown,marginBottom:8}}>
+            🔄 {t("Update Stock Levels (regular use)","இருப்பு புதுப்பிப்பு (வழக்கமான பயன்பாடு)")}
+          </div>
+          <div style={{fontSize:11,color:P.muted,marginBottom:10}}>
+            {t("Use this whenever you do a physical stock check — export a Shopping List or Purchase Order, fill in your actual counted quantity per ingredient (Available / In Stock column), and import here. Unlike Opening Stock, this reconciles the difference: if your count is higher than the system's balance, it records a purchase for the gap; if lower, it records a consumption adjustment. To Buy calculations across the app pick this up automatically.","வழக்கமான பயன்பாட்டிற்கு — உண்மையான எண்ணிக்கையை நிரப்பி இறக்கவும். வேறுபாட்டை இது சரிசெய்யும்.")}
+          </div>
+          <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
+            <div>
+              <label style={css.lbl}>{t("Count Date","எண்ணிக்கை தேதி")}</label>
+              <input type="date" style={{...css.inp,width:150}} value={reconcileDate} onChange={e=>setReconcileDate(e.target.value)}/>
+            </div>
+            <button style={css.btn("info",true)} onClick={()=>reconcileRef.current.click()}>📤 {t("Import Stock Count","எண்ணிக்கை இறக்கு")}</button>
+            <input ref={reconcileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importStockReconciliation}/>
+          </div>
+          {reconcileMsg&&<div style={{fontSize:12,color:"#1E40AF",fontWeight:600,marginTop:10}}>✓ {reconcileMsg}</div>}
         </div>
       )}
 
