@@ -689,6 +689,12 @@ function IngsPage({ctx}){
 
   const visible=cat==="all"?ingredients:ingredients.filter(i=>i.category===cat);
 
+  const [ingPageNum,setIngPageNum]=useState(1);
+  const [ingPageSize,setIngPageSize]=useState(20);
+  useEffect(()=>{setIngPageNum(1);},[cat,ingPageSize]);
+  const ingTotalPages=Math.max(1,Math.ceil(visible.length/ingPageSize));
+  const pagedVisible=visible.slice((ingPageNum-1)*ingPageSize,ingPageNum*ingPageSize);
+
   const saveEdit=()=>{
     setIngredients(p=>p.map(i=>i.id===editId?{...ef,normCost:ef.normCost?+ef.normCost:0}:i));
     setEditId(null);
@@ -750,7 +756,7 @@ function IngsPage({ctx}){
             {["#",t("Name","பெயர்"),t("Tamil","தமிழ்"),t("Category","வகை"),t("Unit","அலகு"),t("Norm Cost ₹","நிலையான விலை"),t("Cut Yield","நறுக்கல் விகிதம்"),t("Scaling Factor","காரணி"),t("Benchmark","வரம்பு"),""].map((h,i)=><th key={i} style={css.th}>{h}</th>)}
           </tr></thead>
           <tbody>
-            {visible.map((ing,i)=>{
+            {pagedVisible.map((ing,i)=>{
               const ed=editId===ing.id;
               return(
                 <tr key={ing.id} style={{background:i%2===0?P.white:P.highlight}}>
@@ -790,6 +796,23 @@ function IngsPage({ctx}){
             </tr>
           </tbody>
         </table>
+      </div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8,flexWrap:"wrap",gap:10}}>
+        <div style={{fontSize:11,color:P.muted}}>
+          {visible.length} {t("ingredient(s)","பொருட்கள்")} — {t("showing","காட்டுகிறது")} {visible.length===0?0:(ingPageNum-1)*ingPageSize+1}–{Math.min(ingPageNum*ingPageSize,visible.length)}
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+          <select style={{...css.sel,fontSize:11,padding:"4px 8px"}} value={ingPageSize} onChange={e=>setIngPageSize(+e.target.value)}>
+            <option value={10}>10 / {t("page","பக்கம்")}</option>
+            <option value={20}>20 / {t("page","பக்கம்")}</option>
+            <option value={50}>50 / {t("page","பக்கம்")}</option>
+          </select>
+          <button style={css.btn("ghost",true)} disabled={ingPageNum<=1} onClick={()=>setIngPageNum(1)}>{"«"}</button>
+          <button style={css.btn("ghost",true)} disabled={ingPageNum<=1} onClick={()=>setIngPageNum(p=>p-1)}>{"‹"}</button>
+          <span style={{fontSize:12,color:P.deepBrown,fontWeight:600}}>{ingPageNum} / {ingTotalPages}</span>
+          <button style={css.btn("ghost",true)} disabled={ingPageNum>=ingTotalPages} onClick={()=>setIngPageNum(p=>p+1)}>{"›"}</button>
+          <button style={css.btn("ghost",true)} disabled={ingPageNum>=ingTotalPages} onClick={()=>setIngPageNum(ingTotalPages)}>{"»"}</button>
+        </div>
       </div>
       <div style={{fontSize:11,color:P.muted,marginTop:6}}>
         💡 {t("Scaling Factor < 1 = sub-linear. Benchmark = qty above which sub-linear kicks in. E.g. Salt factor 0.75, benchmark 200g: first 200g scales linearly, excess × 0.75.","காரணி < 1 = குறைந்த விகிதம். வரம்பு அளவுக்கு மேல் காரணி பயன்படும்.")}
@@ -1096,6 +1119,11 @@ function RecsPage({ctx}){
   const subRecs=recipes.filter(r=>r.isSubRecipe).filter(filterFn);
   const usedTypes=[...new Set(recipes.map(r=>r.recipeType).filter(Boolean))];
 
+  const [recPageSize,setRecPageSize]=useState(20);
+  const [mainPageNum,setMainPageNum]=useState(1);
+  const [subPageNum,setSubPageNum]=useState(1);
+  useEffect(()=>{setMainPageNum(1);setSubPageNum(1);},[q,typeF,recPageSize]);
+
   return(
     <div>
       <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"center",flexWrap:"wrap"}}>
@@ -1119,9 +1147,12 @@ function RecsPage({ctx}){
         {t("Blue rows have no ingredients — click to edit","நீல வரிசைகளில் பொருட்கள் இல்லை — திருத்த கிளிக்")}
       </div>
       {([
-        {label:t("Recipes","சமையல் குறிப்புகள்"),list:mainRecs,color:P.deepBrown},
-        {label:t("Sub-Recipes","துணை சமையல்"),list:subRecs,color:P.purple},
-      ]).map(({label,list,color})=>(
+        {label:t("Recipes","சமையல் குறிப்புகள்"),list:mainRecs,color:P.deepBrown,pageNum:mainPageNum,setPageNum:setMainPageNum},
+        {label:t("Sub-Recipes","துணை சமையல்"),list:subRecs,color:P.purple,pageNum:subPageNum,setPageNum:setSubPageNum},
+      ]).map(({label,list,color,pageNum,setPageNum})=>{
+        const totalPages=Math.max(1,Math.ceil(list.length/recPageSize));
+        const paged=list.slice((pageNum-1)*recPageSize,pageNum*recPageSize);
+        return(
       <div key={label} style={{...css.card,padding:0,overflow:"hidden",marginBottom:12}}>
         <div style={{padding:"8px 14px",background:color,color:"white",fontWeight:700,fontSize:13}}>
           {label} <span style={{fontWeight:400,fontSize:11,opacity:0.8}}>({list.length})</span>
@@ -1140,7 +1171,7 @@ function RecsPage({ctx}){
           </tr></thead>
           <tbody>
             {list.length===0&&<tr><td colSpan={8} style={{...css.td,textAlign:"center",color:P.muted,padding:20}}>{t("No recipes found.","சமையல் இல்லை.")}</td></tr>}
-            {list.map((r,i)=>{
+            {paged.map((r,i)=>{
               const noIngs=!(r.ingredients||[]).length&&!(r.subLinks||[]).length;
               const rowBg=noIngs?"#DBEAFE":i%2===0?P.white:P.highlight;
               const hoverBg=noIngs?"#BFDBFE":"#FDE8C4";
@@ -1180,8 +1211,26 @@ function RecsPage({ctx}){
             );})}
           </tbody>
         </table>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 14px",flexWrap:"wrap",gap:10,background:P.cardBg}}>
+          <div style={{fontSize:11,color:P.muted}}>
+            {t("showing","காட்டுகிறது")} {list.length===0?0:(pageNum-1)*recPageSize+1}–{Math.min(pageNum*recPageSize,list.length)} {t("of","இல்")} {list.length}
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <select style={{...css.sel,fontSize:11,padding:"4px 8px"}} value={recPageSize} onChange={e=>setRecPageSize(+e.target.value)}>
+              <option value={10}>10 / {t("page","பக்கம்")}</option>
+              <option value={20}>20 / {t("page","பக்கம்")}</option>
+              <option value={50}>50 / {t("page","பக்கம்")}</option>
+            </select>
+            <button style={css.btn("ghost",true)} disabled={pageNum<=1} onClick={()=>setPageNum(1)}>{"«"}</button>
+            <button style={css.btn("ghost",true)} disabled={pageNum<=1} onClick={()=>setPageNum(p=>p-1)}>{"‹"}</button>
+            <span style={{fontSize:12,color:P.deepBrown,fontWeight:600}}>{pageNum} / {totalPages}</span>
+            <button style={css.btn("ghost",true)} disabled={pageNum>=totalPages} onClick={()=>setPageNum(p=>p+1)}>{"›"}</button>
+            <button style={css.btn("ghost",true)} disabled={pageNum>=totalPages} onClick={()=>setPageNum(totalPages)}>{"»"}</button>
+          </div>
+        </div>
       </div>
-      ))}
+        );
+      })}
       <div style={{fontSize:11,color:P.muted,marginTop:4}}>{mainRecs.length+subRecs.length} {t("recipe(s) shown","சமையல்கள் காட்டப்படுகின்றன")} — {t("click name to view / edit details","பெயரை சொடுக்கி விவரம் காண்க")}</div>
     </div>
   );
@@ -1812,6 +1861,12 @@ function OrdersPage({ctx}){
       return(!dq||odate.includes(dq))&&(!nameQ||o.name.toLowerCase().includes(nameQ.toLowerCase()));
     });
 
+  const [pageNum,setPageNum]=useState(1);
+  const [pageSize,setPageSize]=useState(20);
+  useEffect(()=>{setPageNum(1);},[dateQ,nameQ,pageSize]);
+  const totalPages=Math.max(1,Math.ceil(filtReal.length/pageSize));
+  const pagedReal=filtReal.slice((pageNum-1)*pageSize,pageNum*pageSize);
+
   const useTemplate=tpl=>{
     const newOrd={...tpl,id:Date.now(),isTemplate:false,date:TODAY,name:`Order from "${tpl.name}"`};
     setOrders(p=>[...p,newOrd]);
@@ -1998,7 +2053,7 @@ function OrdersPage({ctx}){
           </tr></thead>
           <tbody>
             {filtReal.length===0&&<tr><td colSpan={6} style={{...css.td,textAlign:"center",color:P.muted,padding:20}}>{t("No orders found.","ஆர்டர்கள் இல்லை.")}</td></tr>}
-            {filtReal.map((ord,i)=>{
+            {pagedReal.map((ord,i)=>{
               const locs=[...new Set(ord.entries.map(e=>e.locId))];
               const sess=[...new Set(ord.entries.map(e=>e.session))];
               const locNames=locs.map(id=>locations.find(l=>l.id===id)).filter(Boolean).map(l=>lang==="en"?l.name:l.nameTamil);
@@ -2031,7 +2086,23 @@ function OrdersPage({ctx}){
           </tbody>
         </table>
       </div>
-      <div style={{fontSize:11,color:P.muted,marginTop:4}}>{filtReal.length} {t("order(s) — click name to open","ஆர்டர்கள் — பெயரை சொடுக்கி திற")}</div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8,flexWrap:"wrap",gap:10}}>
+        <div style={{fontSize:11,color:P.muted}}>
+          {filtReal.length} {t("order(s)","ஆர்டர்கள்")} — {t("showing","காட்டுகிறது")} {filtReal.length===0?0:(pageNum-1)*pageSize+1}–{Math.min(pageNum*pageSize,filtReal.length)}
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+          <select style={{...css.sel,fontSize:11,padding:"4px 8px"}} value={pageSize} onChange={e=>setPageSize(+e.target.value)}>
+            <option value={10}>10 / {t("page","பக்கம்")}</option>
+            <option value={20}>20 / {t("page","பக்கம்")}</option>
+            <option value={50}>50 / {t("page","பக்கம்")}</option>
+          </select>
+          <button style={css.btn("ghost",true)} disabled={pageNum<=1} onClick={()=>setPageNum(1)}>{"«"}</button>
+          <button style={css.btn("ghost",true)} disabled={pageNum<=1} onClick={()=>setPageNum(p=>p-1)}>{"‹"}</button>
+          <span style={{fontSize:12,color:P.deepBrown,fontWeight:600}}>{pageNum} / {totalPages}</span>
+          <button style={css.btn("ghost",true)} disabled={pageNum>=totalPages} onClick={()=>setPageNum(p=>p+1)}>{"›"}</button>
+          <button style={css.btn("ghost",true)} disabled={pageNum>=totalPages} onClick={()=>setPageNum(totalPages)}>{"»"}</button>
+        </div>
+      </div>
     </div>
   );
 }
