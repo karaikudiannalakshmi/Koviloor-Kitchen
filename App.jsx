@@ -1760,6 +1760,7 @@ function OrdersPage({ctx}){
   });
   const real=sortOrders(orders.filter(o=>!o.isTemplate));
   const tpls=orders.filter(o=>o.isTemplate);
+  const [ordTab,setOrdTab]=useState("active"); // "active" | "completed"
   const [dateQ,setDateQ]=useState("");
   const [nameQ,setNameQ]=useState("");
   const [dupOpen,setDupOpen]=useState(false);
@@ -1854,16 +1855,20 @@ function OrdersPage({ctx}){
   };
 
   const filtReal=[...real]
-    .sort((a,b)=>b.date.localeCompare(a.date))
+    .filter(o=>ordTab==="active"?o.date>=TODAY:o.date<TODAY)
+    .sort((a,b)=>a.date.localeCompare(b.date))
     .filter(o=>{
       const dq=dateQ.replace(/-/g,"");
       const odate=o.date.replace(/-/g,"");
       return(!dq||odate.includes(dq))&&(!nameQ||o.name.toLowerCase().includes(nameQ.toLowerCase()));
     });
 
+  const activeCount=real.filter(o=>o.date>=TODAY).length;
+  const completedCount=real.filter(o=>o.date<TODAY).length;
+
   const [pageNum,setPageNum]=useState(1);
   const [pageSize,setPageSize]=useState(20);
-  useEffect(()=>{setPageNum(1);},[dateQ,nameQ,pageSize]);
+  useEffect(()=>{setPageNum(1);},[dateQ,nameQ,pageSize,ordTab]);
   const totalPages=Math.max(1,Math.ceil(filtReal.length/pageSize));
   const pagedReal=filtReal.slice((pageNum-1)*pageSize,pageNum*pageSize);
 
@@ -1946,6 +1951,15 @@ function OrdersPage({ctx}){
 
       <div style={{fontSize:11,color:P.muted,marginBottom:14,marginTop:-6}}>
         {t("Excel columns needed: Date, Location, Session, Recipe, Qty, Pax (optional), Gurupooja (optional \"Yes\"). Re-uploading a file with more dates added merges in only the new dates — existing ones update in place.","தேவையான தலைப்புகள்: Date, Location, Session, Recipe, Qty, Pax, Gurupooja. மீண்டும் பதிவேற்றினால் புதிய தேதிகள் மட்டும் சேர்க்கப்படும்.")}
+      </div>
+
+      <div style={{display:"flex",gap:6,marginBottom:14}}>
+        <button style={css.btn(ordTab==="active"?"primary":"ghost")} onClick={()=>setOrdTab("active")}>
+          📋 {t("Active Orders","நடப்பு ஆர்டர்கள்")} <span style={{marginLeft:4,fontSize:11,opacity:0.8}}>({activeCount})</span>
+        </button>
+        <button style={css.btn(ordTab==="completed"?"primary":"ghost")} onClick={()=>setOrdTab("completed")}>
+          ✅ {t("Completed Orders","முடிந்த ஆர்டர்கள்")} <span style={{marginLeft:4,fontSize:11,opacity:0.8}}>({completedCount})</span>
+        </button>
       </div>
 
       {dupOpen&&(
