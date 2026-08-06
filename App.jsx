@@ -1764,13 +1764,16 @@ function OrdersPage({ctx}){
   const [dateQ,setDateQ]=useState("");
   const [nameQ,setNameQ]=useState("");
   const [dupOpen,setDupOpen]=useState(false);
-  const [dupMode,setDupMode]=useState("day"); // "day" | "range"
+  const [dupMode,setDupMode]=useState("day"); // "day" | "range" | "loc"
   const [dupFrom,setDupFrom]=useState(TODAY);
   const [dupTo,setDupTo]=useState(TODAY);
   const [dupSess,setDupSess]=useState("All");
   const [dupRangeFrom,setDupRangeFrom]=useState(TODAY);
   const [dupRangeTo,setDupRangeTo]=useState(TODAY);
   const [dupRangeTarget,setDupRangeTarget]=useState(TODAY);
+  const [dupLocDate,setDupLocDate]=useState(TODAY);
+  const [dupLocSource,setDupLocSource]=useState("");
+  const [dupLocTargets,setDupLocTargets]=useState([]);
   const importFileRef=useRef();
   const [importMsg,setImportMsg]=useState("");
 
@@ -1929,6 +1932,34 @@ function OrdersPage({ctx}){
     alert(copies.length+" "+t("order(s) duplicated, shifted to start","ஆர்டர்(கள்) நகலெடுக்கப்பட்டன, தொடங்கும்")+" "+dupRangeTarget+" ("+t("through","வரை")+" "+lastDate+")");
   };
 
+  // Locations actually used on the selected duplicate-source date
+  const dupLocSourceOptions=locations.filter(l=>
+    orders.some(o=>!o.isTemplate&&o.date===dupLocDate&&(o.entries||[]).some(e=>e.locId===l.id))
+  );
+
+  const toggleDupLocTarget=id=>setDupLocTargets(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+
+  const duplicateToLocations=()=>{
+    if(!dupLocDate||!dupLocSource){alert(t("Select a date and source location.","தேதி மற்றும் மூல இடத்தை தேர்வு செய்யவும்."));return;}
+    if(!dupLocTargets.length){alert(t("Select at least one target location.","குறைந்தது ஒரு இடத்தையாவது தேர்வு செய்யவும்."));return;}
+    const srcLocId=+dupLocSource;
+    const sourceOrders=orders.filter(o=>!o.isTemplate&&o.date===dupLocDate&&(o.entries||[]).some(e=>e.locId===srcLocId));
+    if(!sourceOrders.length){alert(t("No orders found for that date and location.","அந்த தேதி / இடத்திற்கு ஆர்டர் இல்லை."));return;}
+    const newOrders=[]; let idc=Date.now();
+    dupLocTargets.forEach(targetId=>{
+      sourceOrders.forEach(o=>{
+        const entries=(o.entries||[]).filter(e=>e.locId===srcLocId).map(e=>({...e,locId:targetId}));
+        if(!entries.length)return;
+        newOrders.push({id:idc++,name:genOrderName(dupLocDate,entries),date:dupLocDate,isTemplate:false,pax:"",entries});
+      });
+    });
+    setOrders(p=>[...p,...newOrders]);
+    setDupOpen(false);
+    const targetNames=dupLocTargets.map(id=>locations.find(l=>l.id===id)?.name).filter(Boolean).join(", ");
+    alert(newOrders.length+" "+t("order(s) created for","ஆர்டர்(கள்) உருவாக்கப்பட்டன")+": "+targetNames);
+    setDupLocTargets([]);
+  };
+
   return(
     <div>
       <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
@@ -1967,6 +1998,7 @@ function OrdersPage({ctx}){
           <div style={{display:"flex",gap:6,marginBottom:10}}>
             <button style={css.btn(dupMode==="day"?"primary":"ghost",true)} onClick={()=>setDupMode("day")}>{t("Single Day","ஒரு நாள்")}</button>
             <button style={css.btn(dupMode==="range"?"primary":"ghost",true)} onClick={()=>setDupMode("range")}>{t("Date Range","தேதி வரம்பு")}</button>
+            <button style={css.btn(dupMode==="loc"?"primary":"ghost",true)} onClick={()=>setDupMode("loc")}>{t("Other Locations","மற்ற இடங்கள்")}</button>
           </div>
 
           {dupMode==="day"?(
@@ -1997,7 +2029,7 @@ function OrdersPage({ctx}){
               <button style={css.btn("success")} onClick={duplicateDay}>✓ {t("Duplicate","நகலெடு")}</button>
               <button style={css.btn("ghost")} onClick={()=>setDupOpen(false)}>{t("Cancel","ரத்து")}</button>
             </div>
-          ):(
+          ):dupMode==="range"?(
             <div>
               <div style={{fontSize:11,color:P.muted,marginBottom:8}}>
                 {t("Copies every order in the source range to a new range, keeping the same day-to-day pattern (locations, sessions, dishes, quantities). E.g. repeat your last 2 weeks' plan as the next 2 weeks.","மூல வரம்பின் ஒவ்வொரு ஆர்டரையும் புதிய வரம்புக்கு நகலெடுக்கும்.")}
@@ -2019,6 +2051,43 @@ function OrdersPage({ctx}){
                   {dupRangeDayCount} {t("day(s) in source","நாட்கள்")}, {dupRangeMatchCount} {t("order(s) found","ஆர்டர்கள் கிடைத்தன")}
                 </div>
                 <button style={css.btn("success")} onClick={shiftDateRange}>✓ {t("Duplicate Range","வரம்பை நகலெடு")}</button>
+                <button style={css.btn("ghost")} onClick={()=>setDupOpen(false)}>{t("Cancel","ரத்து")}</button>
+              </div>
+            </div>
+          ):(
+            <div>
+              <div style={{fontSize:11,color:P.muted,marginBottom:8}}>
+                {t("Copies one day's orders from a source location into one or more other locations — same dishes and quantities, so you can then just open each copy and adjust the pax count.","ஒரு இடத்தின் ஆர்டரை மற்ற இடங்களுக்கு நகலெடுக்கும்.")}
+              </div>
+              <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap",marginBottom:10}}>
+                <div>
+                  <label style={css.lbl}>{t("Date","தேதி")}</label>
+                  <input type="date" style={{...css.inp,width:150}} value={dupLocDate} onChange={e=>{setDupLocDate(e.target.value);setDupLocSource("");}}/>
+                </div>
+                <div>
+                  <label style={css.lbl}>{t("Copy from location","இதிலிருந்து நகலெடு")}</label>
+                  <select style={{...css.sel,minWidth:180}} value={dupLocSource} onChange={e=>setDupLocSource(e.target.value)}>
+                    <option value="">{t("Select...","தேர்வு...")}</option>
+                    {dupLocSourceOptions.map(l=><option key={l.id} value={l.id}>{lang==="en"?l.name:l.nameTamil}</option>)}
+                  </select>
+                </div>
+                {!dupLocSourceOptions.length&&<div style={{fontSize:11,color:P.danger,paddingBottom:8}}>{t("No orders found on this date.","இந்த தேதியில் ஆர்டர் இல்லை.")}</div>}
+              </div>
+              <div style={{marginBottom:10}}>
+                <label style={css.lbl}>{t("Copy to these locations","இந்த இடங்களுக்கு நகலெடு")}</label>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {locations.filter(l=>l.id!==+dupLocSource).map(l=>(
+                    <label key={l.id} style={{display:"flex",alignItems:"center",gap:5,fontSize:12,cursor:"pointer",
+                      background:dupLocTargets.includes(l.id)?P.saffron+"22":"white",
+                      border:"1px solid "+(dupLocTargets.includes(l.id)?P.saffron:"#DCC88A"),borderRadius:7,padding:"5px 10px"}}>
+                      <input type="checkbox" checked={dupLocTargets.includes(l.id)} onChange={()=>toggleDupLocTarget(l.id)}/>
+                      {lang==="en"?l.name:l.nameTamil}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <button style={css.btn("success")} onClick={duplicateToLocations}>✓ {t("Duplicate to Selected Locations","தேர்ந்த இடங்களுக்கு நகலெடு")}</button>
                 <button style={css.btn("ghost")} onClick={()=>setDupOpen(false)}>{t("Cancel","ரத்து")}</button>
               </div>
             </div>
