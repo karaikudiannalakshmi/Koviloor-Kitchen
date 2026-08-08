@@ -532,6 +532,7 @@ function App(){
             {modal.type==="order"&&<OrderForm ctx={ctx} ord={modal.ord} onClose={()=>setModal(null)}/>}
             {modal.type==="purchase"&&<PurchForm ctx={ctx} onClose={()=>setModal(null)}/>}
             {modal.type==="postIssues"&&<PostIssues ctx={ctx} date={modal.date} onClose={()=>setModal(null)}/>}
+            {modal.type==="adjust"&&<AdjustForm ctx={ctx} onClose={()=>setModal(null)}/>}
             {modal.type==="addLoc"&&<LocForm ctx={ctx} onClose={()=>setModal(null)}/>}
             {modal.type==="recipeTypes"&&<RecipeTypesManager ctx={ctx} onClose={()=>setModal(null)}/>}
             {modal.type==="ingUsage"&&<IngUsageModal ctx={ctx} ing={modal.ing} onClose={()=>setModal(null)}/>}
@@ -5499,6 +5500,7 @@ function InvPage({ctx}){
         <div style={{marginLeft:"auto",display:"flex",gap:6}}>
           {tab==="purchases"&&<button style={css.btn("success",true)} onClick={()=>setModal({type:"purchase"})}>+ {t("Record Purchase","கொள்முதல்")}</button>}
           {tab==="issues"&&<button style={css.btn("info",true)} onClick={()=>setModal({type:"postIssues",date:TODAY})}>📦 {t("Post from Order","ஆர்டரிலிருந்து")}</button>}
+          {tab==="issues"&&<button style={css.btn("danger",true)} onClick={()=>setModal({type:"adjust"})}>⚠️ {t("Record Adjustment","சரிசெய்தல்")}</button>}
         </div>
       </div>
 
@@ -5663,7 +5665,7 @@ function InvPage({ctx}){
                     <td style={css.td}>{ing?.normCost?<span style={{color:P.purple}}>₹{ing.normCost}/{ing.unit}</span>:<span style={{color:"#CCC"}}>—</span>}</td>
                     <td style={css.td}>{issueVal>0?<strong style={{color:P.success}}>₹{issueVal.toFixed(2)}</strong>:<span style={{color:"#CCC"}}>—</span>}</td>
                     <td style={css.td}>{iss.note||"—"}</td>
-                    <td style={css.td}>{iss.adjusted?<span style={css.badge(P.saffron)}>✏️ {t("Adj","மாற்றம்")}</span>:<span style={css.badge(P.success)}>{t("Auto","தானியங்கு")}</span>}</td>
+                    <td style={css.td}>{iss.source==="manual_adjustment"?<span style={css.badge(P.danger)}>⚠️ {t("Adjustment","சரிசெய்தல்")}</span>:iss.adjusted?<span style={css.badge(P.saffron)}>✏️ {t("Adj","மாற்றம்")}</span>:<span style={css.badge(P.success)}>{t("Auto","தானியங்கு")}</span>}</td>
                     <td style={css.td}><button style={css.btn("danger",true)} onClick={()=>setInventory(p=>({...p,issues:p.issues.filter(x=>x.id!==iss.id)}))}>🗑</button></td>
                   </tr>
                 );
@@ -5836,4 +5838,85 @@ function PurchForm({ctx,onClose}){
     </div>
   );
 }
+function AdjustForm({ctx,onClose}){
+  const {ingredients,inventory,setInventory,lang}=ctx;
+  const t=(en,ta)=>lang==="en"?en:ta;
+  const n=(x)=>lang==="en"?x.name:x.nameTamil;
+  const REASONS=[
+    {id:"wastage",en:"Wastage / Spoilage",ta:"வீணாதல்"},
+    {id:"cutting_loss",en:"Extra Cutting/Peeling Loss",ta:"நறுக்கல் இழப்பு"},
+    {id:"extra_usage",en:"Extra Usage (unplanned)",ta:"கூடுதல் பயன்பாடு"},
+    {id:"correction",en:"Stock Correction",ta:"திருத்தம்"},
+    {id:"other",en:"Other",ta:"மற்றவை"},
+  ];
+  const [f,setF]=useState({iid:"",date:TODAY,qty:"",reason:"wastage",note:""});
+
+  const selIng=f.iid?ingredients.find(x=>x.id===+f.iid):null;
+  const getBal=iid=>{
+    const p=inventory.purchases.filter(x=>x.iid===iid).reduce((s,x)=>s+x.qty,0);
+    const iss=inventory.issues.filter(x=>x.iid===iid).reduce((s,x)=>s+x.qty,0);
+    return p-iss;
+  };
+  const curBal=selIng?getBal(selIng.id):null;
+
+  const save=()=>{
+    if(!f.iid||!f.qty||+f.qty<=0)return;
+    const reasonLabel=REASONS.find(r=>r.id===f.reason);
+    const note=(lang==="en"?reasonLabel?.en:reasonLabel?.ta)+(f.note?" — "+f.note:"");
+    setInventory(p=>({...p,issues:[...p.issues,{
+      id:Date.now(),iid:+f.iid,date:f.date,qty:+f.qty,unit:selIng?.unit||"kg",
+      note,adjusted:true,source:"manual_adjustment",
+    }]}));
+    onClose();
+  };
+
+  return(
+    <div>
+      <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,color:P.deepBrown,marginBottom:4}}>
+        ⚠️ {t("Record Adjustment","சரிசெய்தல் பதிவு")}
+      </div>
+      <div style={{fontSize:11,color:P.muted,marginBottom:14}}>
+        {t("For extra quantity issued beyond what an order calculated — e.g. vegetable wastage or trimming loss. This records directly as an Issue, reducing stock balance immediately.","ஆர்டர் கணக்கிட்டதை விட கூடுதலாக வழங்கப்பட்ட அளவுக்கு — எ.கா. காய்கறி வீணாதல்.")}
+      </div>
+      <div style={css.g2}>
+        <div>
+          <label style={css.lbl}>{t("Ingredient","பொருள்")}</label>
+          <select style={{...css.sel,width:"100%"}} value={f.iid} onChange={e=>setF({...f,iid:e.target.value})}>
+            <option value="">{t("Select...","தேர்வு...")}</option>
+            {ingredients.map(i=><option key={i.id} value={i.id}>{n(i)} ({i.unit})</option>)}
+          </select>
+          {selIng&&<div style={{marginTop:5,fontSize:11,color:P.muted}}>
+            {t("Current balance","தற்போதைய இருப்பு")}: <strong style={{color:curBal>0?P.success:P.danger}}>{curBal.toFixed(2)} {selIng.unit}</strong>
+          </div>}
+        </div>
+        <div>
+          <label style={css.lbl}>{t("Date","தேதி")}</label>
+          <input type="date" style={css.inp} value={f.date} onChange={e=>setF({...f,date:e.target.value})}/>
+        </div>
+        <div>
+          <label style={css.lbl}>{t("Extra Qty Issued","கூடுதல் வழங்கிய அளவு")}</label>
+          <input type="number" step="0.01" min="0" style={css.inp} value={f.qty} onChange={e=>setF({...f,qty:e.target.value})}/>
+          {selIng&&f.qty&&<div style={{marginTop:4,fontSize:11,color:P.muted}}>
+            {t("New balance will be","புதிய இருப்பு")}: <strong>{(curBal-(+f.qty||0)).toFixed(2)} {selIng.unit}</strong>
+          </div>}
+        </div>
+        <div>
+          <label style={css.lbl}>{t("Reason","காரணம்")}</label>
+          <select style={{...css.sel,width:"100%"}} value={f.reason} onChange={e=>setF({...f,reason:e.target.value})}>
+            {REASONS.map(r=><option key={r.id} value={r.id}>{t(r.en,r.ta)}</option>)}
+          </select>
+        </div>
+        <div style={{gridColumn:"1 / -1"}}>
+          <label style={css.lbl}>{t("Note (optional)","குறிப்பு (விருப்பம்)")}</label>
+          <input style={css.inp} value={f.note} onChange={e=>setF({...f,note:e.target.value})} placeholder={t("e.g. Onion peeling loss more than usual today","எ.கா. இன்று வெங்காய தோல் உரித்தல் இழப்பு அதிகம்")}/>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16}}>
+        <button style={css.btn("ghost")} onClick={onClose}>{t("Cancel","ரத்து")}</button>
+        <button style={css.btn("danger")} onClick={save} disabled={!f.iid||!f.qty}>⚠️ {t("Record Adjustment","சரிசெய்தல் பதிவு")}</button>
+      </div>
+    </div>
+  );
+}
+
 export default App;
