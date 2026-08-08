@@ -5298,6 +5298,10 @@ function InvPage({ctx}){
   const n=(x)=>lang==="en"?x.name:x.nameTamil;
   const [tab,setTab]=useState("balance");
   const [q,setQ]=useState("");
+  const [issueDateQ,setIssueDateQ]=useState("");
+  const [issuePageNum,setIssuePageNum]=useState(1);
+  const [issuePageSize,setIssuePageSize]=useState(20);
+  useEffect(()=>{setIssuePageNum(1);},[issueDateQ,issuePageSize]);
   const openStockRef=useRef();
   const [openStockDate,setOpenStockDate]=useState(TODAY);
   const [openStockMsg,setOpenStockMsg]=useState("");
@@ -5634,46 +5638,79 @@ function InvPage({ctx}){
       )}
 
       {/* ── ISSUES ── */}
-      {tab==="issues"&&(
-        <div style={{...css.card,padding:0,overflow:"auto"}}>
-          <table style={css.table}>
-            <thead><tr>
-              <th style={css.th}>{t("Date","தேதி")}</th>
-              <th style={css.th}>{t("Ingredient","பொருள்")}</th>
-              <th style={css.th}>{t("Qty Issued","வழங்கிய அளவு")}</th>
-              <th style={css.th}>{t("Norm Cost","நிலையான விலை")}</th>
-              <th style={css.th}>{t("Issue Value","வழங்கல் மதிப்பு")}</th>
-              <th style={css.th}>{t("Note","குறிப்பு")}</th>
-              <th style={css.th}>{t("Adjusted","மாற்றம்")}</th>
-              <th style={css.th}></th>
-            </tr></thead>
-            <tbody>
-              {inventory.issues.length===0&&<tr><td colSpan={8} style={{...css.td,textAlign:"center",color:P.muted}}>{t("No issues. Post from Dish-wise Report or Orders.","வழங்கல் இல்லை.")}</td></tr>}
-              {[...inventory.issues].sort((a,b)=>b.date.localeCompare(a.date)).map((iss,i)=>{
-                const ing=ingredients.find(x=>x.id===iss.iid);
-                const issueVal=(ing?.normCost||0)*iss.qty;
-                return(
-                  <tr key={iss.id} style={{background:i%2===0?P.white:P.highlight}}>
-                    <td style={css.td}>{iss.date}</td>
-                    <td style={css.td}>{ing?n(ing):"?"}</td>
-                    <td style={css.td}>
-                      <div style={{display:"flex",alignItems:"center",gap:4}}>
-                        <input type="number" step="0.01" style={{...css.inp,width:80,padding:"3px 6px",borderColor:iss.adjusted?"#F59E0B":"#DCC88A"}} value={iss.qty} onChange={e=>setInventory(p=>({...p,issues:p.issues.map(x=>x.id===iss.id?{...x,qty:+e.target.value,adjusted:true}:x)}))}/>
-                        <span style={{fontSize:11,color:P.muted}}>{iss.unit}</span>
-                      </div>
-                    </td>
-                    <td style={css.td}>{ing?.normCost?<span style={{color:P.purple}}>₹{ing.normCost}/{ing.unit}</span>:<span style={{color:"#CCC"}}>—</span>}</td>
-                    <td style={css.td}>{issueVal>0?<strong style={{color:P.success}}>₹{issueVal.toFixed(2)}</strong>:<span style={{color:"#CCC"}}>—</span>}</td>
-                    <td style={css.td}>{iss.note||"—"}</td>
-                    <td style={css.td}>{iss.source==="manual_adjustment"?<span style={css.badge(P.danger)}>⚠️ {t("Adjustment","சரிசெய்தல்")}</span>:iss.adjusted?<span style={css.badge(P.saffron)}>✏️ {t("Adj","மாற்றம்")}</span>:<span style={css.badge(P.success)}>{t("Auto","தானியங்கு")}</span>}</td>
-                    <td style={css.td}><button style={css.btn("danger",true)} onClick={()=>setInventory(p=>({...p,issues:p.issues.filter(x=>x.id!==iss.id)}))}>🗑</button></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      {tab==="issues"&&(()=>{
+        const sortedIssues=[...inventory.issues].sort((a,b)=>b.date.localeCompare(a.date));
+        const dq=issueDateQ.replace(/-/g,"");
+        const filteredIssues=sortedIssues.filter(iss=>!dq||iss.date.replace(/-/g,"").includes(dq));
+        const issueTotalPages=Math.max(1,Math.ceil(filteredIssues.length/issuePageSize));
+        const pagedIssues=filteredIssues.slice((issuePageNum-1)*issuePageSize,issuePageNum*issuePageSize);
+        return(
+        <div>
+          <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap",marginBottom:10}}>
+            <div>
+              <label style={css.lbl}>{t("Search Date","தேதி தேடு")}</label>
+              <input type="date" style={{...css.inp,width:160}} value={issueDateQ} onChange={e=>setIssueDateQ(e.target.value)}/>
+            </div>
+            {issueDateQ&&<button style={css.btn("ghost",true)} onClick={()=>setIssueDateQ("")}>✕ {t("Clear","அழி")}</button>}
+          </div>
+          <div style={{...css.card,padding:0,overflow:"auto"}}>
+            <table style={css.table}>
+              <thead><tr>
+                <th style={css.th}>{t("Date","தேதி")}</th>
+                <th style={css.th}>{t("Ingredient","பொருள்")}</th>
+                <th style={css.th}>{t("Qty Issued","வழங்கிய அளவு")}</th>
+                <th style={css.th}>{t("Norm Cost","நிலையான விலை")}</th>
+                <th style={css.th}>{t("Issue Value","வழங்கல் மதிப்பு")}</th>
+                <th style={css.th}>{t("Note","குறிப்பு")}</th>
+                <th style={css.th}>{t("Adjusted","மாற்றம்")}</th>
+                <th style={css.th}></th>
+              </tr></thead>
+              <tbody>
+                {filteredIssues.length===0&&<tr><td colSpan={8} style={{...css.td,textAlign:"center",color:P.muted}}>{issueDateQ?t("No issues on this date.","இந்த தேதியில் வழங்கல் இல்லை."):t("No issues. Post from Dish-wise Report or Orders.","வழங்கல் இல்லை.")}</td></tr>}
+                {pagedIssues.map((iss,i)=>{
+                  const ing=ingredients.find(x=>x.id===iss.iid);
+                  const issueVal=(ing?.normCost||0)*iss.qty;
+                  return(
+                    <tr key={iss.id} style={{background:i%2===0?P.white:P.highlight}}>
+                      <td style={css.td}>{iss.date}</td>
+                      <td style={css.td}>{ing?n(ing):"?"}</td>
+                      <td style={css.td}>
+                        <div style={{display:"flex",alignItems:"center",gap:4}}>
+                          <input type="number" step="0.01" style={{...css.inp,width:80,padding:"3px 6px",borderColor:iss.adjusted?"#F59E0B":"#DCC88A"}} value={iss.qty} onChange={e=>setInventory(p=>({...p,issues:p.issues.map(x=>x.id===iss.id?{...x,qty:+e.target.value,adjusted:true}:x)}))}/>
+                          <span style={{fontSize:11,color:P.muted}}>{iss.unit}</span>
+                        </div>
+                      </td>
+                      <td style={css.td}>{ing?.normCost?<span style={{color:P.purple}}>₹{ing.normCost}/{ing.unit}</span>:<span style={{color:"#CCC"}}>—</span>}</td>
+                      <td style={css.td}>{issueVal>0?<strong style={{color:P.success}}>₹{issueVal.toFixed(2)}</strong>:<span style={{color:"#CCC"}}>—</span>}</td>
+                      <td style={css.td}>{iss.note||"—"}</td>
+                      <td style={css.td}>{iss.source==="manual_adjustment"?<span style={css.badge(P.danger)}>⚠️ {t("Adjustment","சரிசெய்தல்")}</span>:iss.adjusted?<span style={css.badge(P.saffron)}>✏️ {t("Adj","மாற்றம்")}</span>:<span style={css.badge(P.success)}>{t("Auto","தானியங்கு")}</span>}</td>
+                      <td style={css.td}><button style={css.btn("danger",true)} onClick={()=>setInventory(p=>({...p,issues:p.issues.filter(x=>x.id!==iss.id)}))}>🗑</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8,flexWrap:"wrap",gap:10}}>
+            <div style={{fontSize:11,color:P.muted}}>
+              {filteredIssues.length} {t("issue(s)","வழங்கல்கள்")} — {t("showing","காட்டுகிறது")} {filteredIssues.length===0?0:(issuePageNum-1)*issuePageSize+1}–{Math.min(issuePageNum*issuePageSize,filteredIssues.length)}
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              <select style={{...css.sel,fontSize:11,padding:"4px 8px"}} value={issuePageSize} onChange={e=>setIssuePageSize(+e.target.value)}>
+                <option value={20}>20 / {t("page","பக்கம்")}</option>
+                <option value={50}>50 / {t("page","பக்கம்")}</option>
+                <option value={100}>100 / {t("page","பக்கம்")}</option>
+              </select>
+              <button style={css.btn("ghost",true)} disabled={issuePageNum<=1} onClick={()=>setIssuePageNum(1)}>{"«"}</button>
+              <button style={css.btn("ghost",true)} disabled={issuePageNum<=1} onClick={()=>setIssuePageNum(p=>p-1)}>{"‹"}</button>
+              <span style={{fontSize:12,color:P.deepBrown,fontWeight:600}}>{issuePageNum} / {issueTotalPages}</span>
+              <button style={css.btn("ghost",true)} disabled={issuePageNum>=issueTotalPages} onClick={()=>setIssuePageNum(p=>p+1)}>{"›"}</button>
+              <button style={css.btn("ghost",true)} disabled={issuePageNum>=issueTotalPages} onClick={()=>setIssuePageNum(issueTotalPages)}>{"»"}</button>
+            </div>
+          </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ── COST ALERTS ── */}
       {tab==="alerts"&&(
