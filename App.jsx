@@ -1972,7 +1972,10 @@ function OrdersPage({ctx}){
           return{...e,locId:targetId};
         });
         if(!entries.length)return;
-        newOrders.push({id:idc++,name:o.name,date:dupLocDate,isTemplate:false,pax:targetPax||"",entries});
+        const targetLoc=locations.find(l=>l.id===targetId);
+        const locLabel=targetLoc?(lang==="en"?targetLoc.name:(targetLoc.nameTamil||targetLoc.name)):"";
+        const newName=locLabel?o.name+" - "+locLabel:o.name;
+        newOrders.push({id:idc++,name:newName,date:dupLocDate,isTemplate:false,pax:targetPax||"",entries});
       });
     });
     setOrders(p=>[...p,...newOrders]);
@@ -2576,13 +2579,17 @@ function OrderForm({ctx,ord,onClose}){
             </tr></thead>
             <tbody>
               {f.entries.map((e,i)=>{
-                const loc=locations.find(l=>l.id===e.locId);
                 const rec=recipes.find(r=>r.id===e.recId);
                 const lineCost=rec?computeRecipeCost(rec,e.qty/(rec.yield||1),recipes,ingredients):0;
                 const scaled=e.basePax&&+f.pax>0&&+f.pax!==e.basePax;
                 return(
                   <tr key={i} style={{background:i%2===0?P.white:P.highlight}}>
-                    <td style={css.td}>{loc?(lang==="en"?loc.name:loc.nameTamil):"?"}</td>
+                    <td style={css.td}>
+                      <select style={{...css.sel,fontSize:12,padding:"3px 6px"}} value={e.locId}
+                        onChange={ev=>setF(x=>({...x,entries:x.entries.map((en,j)=>j===i?{...en,locId:+ev.target.value}:en)}))}>
+                        {locations.map(l=><option key={l.id} value={l.id}>{lang==="en"?l.name:l.nameTamil}</option>)}
+                      </select>
+                    </td>
                     <td style={css.td}><span style={css.badge(SCOLOR[e.session]||P.muted)}>{e.session}</span></td>
                     <td style={css.td}>{rec?(lang==="en"?rec.name:rec.nameTamil):"?"}</td>
                     <td style={css.td}>
