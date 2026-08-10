@@ -1775,6 +1775,10 @@ function OrdersPage({ctx}){
   const [dupLocDate,setDupLocDate]=useState(TODAY);
   const [dupLocSource,setDupLocSource]=useState("");
   const [dupLocTargets,setDupLocTargets]=useState([]);
+  const [dupRepSourceDate,setDupRepSourceDate]=useState(TODAY);
+  const [dupRepSourceLoc,setDupRepSourceLoc]=useState("");
+  const [dupRepStart,setDupRepStart]=useState(TODAY);
+  const [dupRepDays,setDupRepDays]=useState(30);
   const importFileRef=useRef();
   const [importMsg,setImportMsg]=useState("");
 
@@ -1963,6 +1967,33 @@ function OrdersPage({ctx}){
     setDupLocTargets([]);
   };
 
+  const dupRepEntryCount=locId=>orders
+    .filter(o=>!o.isTemplate&&o.date===dupRepSourceDate)
+    .flatMap(o=>o.entries||[])
+    .filter(e=>e.locId===locId).length;
+
+  const duplicateRepeatDaily=()=>{
+    if(!dupRepSourceDate||!dupRepSourceLoc){alert(t("Select a source date and location.","மூல தேதி மற்றும் இடத்தை தேர்வு செய்யவும்."));return;}
+    const srcLocId=+dupRepSourceLoc;
+    const sourceOrders=orders.filter(o=>!o.isTemplate&&o.date===dupRepSourceDate&&(o.entries||[]).some(e=>e.locId===srcLocId));
+    if(!sourceOrders.length){alert(t("No orders found for that date and location.","அந்த தேதி / இடத்திற்கு ஆர்டர் இல்லை."));return;}
+    const days=Math.max(1,Math.min(366,+dupRepDays||1));
+    const newOrders=[]; let idc=Date.now();
+    for(let i=0;i<days;i++){
+      const d=new Date(dupRepStart); d.setDate(d.getDate()+i);
+      const dateStr=d.toISOString().slice(0,10);
+      sourceOrders.forEach(o=>{
+        const entries=(o.entries||[]).filter(e=>e.locId===srcLocId).map(e=>({...e}));
+        if(!entries.length)return;
+        newOrders.push({id:idc++,name:genOrderName(dateStr,entries),date:dateStr,isTemplate:false,pax:"",entries});
+      });
+    }
+    setOrders(p=>[...p,...newOrders]);
+    setDupOpen(false);
+    const endDate=new Date(dupRepStart); endDate.setDate(endDate.getDate()+days-1);
+    alert(newOrders.length+" "+t("order(s) created,","ஆர்டர்(கள்) உருவாக்கப்பட்டன,")+" "+dupRepStart+" "+t("through","வரை")+" "+endDate.toISOString().slice(0,10));
+  };
+
   return(
     <div>
       <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
@@ -2002,6 +2033,7 @@ function OrdersPage({ctx}){
             <button style={css.btn(dupMode==="day"?"primary":"ghost",true)} onClick={()=>setDupMode("day")}>{t("Single Day","ஒரு நாள்")}</button>
             <button style={css.btn(dupMode==="range"?"primary":"ghost",true)} onClick={()=>setDupMode("range")}>{t("Date Range","தேதி வரம்பு")}</button>
             <button style={css.btn(dupMode==="loc"?"primary":"ghost",true)} onClick={()=>setDupMode("loc")}>{t("Other Locations","மற்ற இடங்கள்")}</button>
+            <button style={css.btn(dupMode==="repeat"?"primary":"ghost",true)} onClick={()=>setDupMode("repeat")}>{t("Repeat Daily","தினமும் மீண்டும்")}</button>
           </div>
 
           {dupMode==="day"?(
@@ -2057,7 +2089,7 @@ function OrdersPage({ctx}){
                 <button style={css.btn("ghost")} onClick={()=>setDupOpen(false)}>{t("Cancel","ரத்து")}</button>
               </div>
             </div>
-          ):(
+          ):dupMode==="loc"?(
             <div>
               <div style={{fontSize:11,color:P.muted,marginBottom:8}}>
                 {t("Copies one day's orders from a source location into one or more other locations — same dishes and quantities, so you can then just open each copy and adjust the pax count.","ஒரு இடத்தின் ஆர்டரை மற்ற இடங்களுக்கு நகலெடுக்கும்.")}
@@ -2094,6 +2126,41 @@ function OrdersPage({ctx}){
               </div>
               <div style={{display:"flex",gap:8}}>
                 <button style={css.btn("success")} onClick={duplicateToLocations}>✓ {t("Duplicate to Selected Locations","தேர்ந்த இடங்களுக்கு நகலெடு")}</button>
+                <button style={css.btn("ghost")} onClick={()=>setDupOpen(false)}>{t("Cancel","ரத்து")}</button>
+              </div>
+            </div>
+          ):(
+            <div>
+              <div style={{fontSize:11,color:P.muted,marginBottom:8}}>
+                {t("Repeats one day's order for one location across many consecutive days — e.g. copy today's Then Sabanayagar menu forward for the next 30 days.","ஒரு நாளின் ஆர்டரை பல தொடர் நாட்களுக்கு மீண்டும் நகலெடுக்கும்.")}
+              </div>
+              <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap",marginBottom:10}}>
+                <div>
+                  <label style={css.lbl}>{t("Source Date","மூல தேதி")}</label>
+                  <input type="date" style={{...css.inp,width:150}} value={dupRepSourceDate} onChange={e=>{setDupRepSourceDate(e.target.value);setDupRepSourceLoc("");}}/>
+                </div>
+                <div>
+                  <label style={css.lbl}>{t("Source Location","மூல இடம்")}</label>
+                  <select style={{...css.sel,minWidth:220}} value={dupRepSourceLoc} onChange={e=>setDupRepSourceLoc(e.target.value)}>
+                    <option value="">{t("Select...","தேர்வு...")}</option>
+                    {locations.map(l=>{
+                      const cnt=dupRepEntryCount(l.id);
+                      return <option key={l.id} value={l.id}>{lang==="en"?l.name:l.nameTamil}{cnt?" ("+cnt+" "+t("entries","பதிவுகள்")+")":" — "+t("no orders this date","இந்த தேதியில் இல்லை")}</option>;
+                    })}
+                  </select>
+                </div>
+              </div>
+              {dupRepSourceLoc&&dupRepEntryCount(+dupRepSourceLoc)===0&&<div style={{fontSize:11,color:P.danger,marginBottom:10}}>{t("This location has no orders on the source date — pick a different date or location.","இந்த இடத்திற்கு இந்த தேதியில் ஆர்டர் இல்லை.")}</div>}
+              <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
+                <div>
+                  <label style={css.lbl}>{t("Repeat starting from","இதிலிருந்து தொடங்கு")}</label>
+                  <input type="date" style={{...css.inp,width:150}} value={dupRepStart} onChange={e=>setDupRepStart(e.target.value)}/>
+                </div>
+                <div>
+                  <label style={css.lbl}>{t("Number of Days","நாட்களின் எண்ணிக்கை")}</label>
+                  <input type="number" min="1" max="366" style={{...css.inp,width:100}} value={dupRepDays} onChange={e=>setDupRepDays(e.target.value)}/>
+                </div>
+                <button style={css.btn("success")} onClick={duplicateRepeatDaily}>✓ {t("Repeat Daily","தினமும் மீண்டும்")}</button>
                 <button style={css.btn("ghost")} onClick={()=>setDupOpen(false)}>{t("Cancel","ரத்து")}</button>
               </div>
             </div>
