@@ -1775,10 +1775,12 @@ function OrdersPage({ctx}){
   const [dupLocDate,setDupLocDate]=useState(TODAY);
   const [dupLocSource,setDupLocSource]=useState("");
   const [dupLocTargets,setDupLocTargets]=useState([]);
+  const [dupLocSess,setDupLocSess]=useState("All");
   const [dupRepSourceDate,setDupRepSourceDate]=useState(TODAY);
   const [dupRepSourceLoc,setDupRepSourceLoc]=useState("");
   const [dupRepStart,setDupRepStart]=useState(TODAY);
   const [dupRepDays,setDupRepDays]=useState(30);
+  const [dupRepSess,setDupRepSess]=useState("All");
   const importFileRef=useRef();
   const [importMsg,setImportMsg]=useState("");
 
@@ -1937,11 +1939,11 @@ function OrdersPage({ctx}){
     alert(copies.length+" "+t("order(s) duplicated, shifted to start","ஆர்டர்(கள்) நகலெடுக்கப்பட்டன, தொடங்கும்")+" "+dupRangeTarget+" ("+t("through","வரை")+" "+lastDate+")");
   };
 
-  // All locations are selectable as source; annotate with how many entries exist on the picked date
+  // All locations are selectable as source; annotate with how many entries exist on the picked date/session
   const dupLocEntryCount=locId=>orders
     .filter(o=>!o.isTemplate&&o.date===dupLocDate)
     .flatMap(o=>o.entries||[])
-    .filter(e=>e.locId===locId).length;
+    .filter(e=>e.locId===locId&&(dupLocSess==="All"||e.session===dupLocSess)).length;
   const dupLocSourceOptions=locations;
 
   const toggleDupLocTarget=id=>setDupLocTargets(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
@@ -1950,12 +1952,12 @@ function OrdersPage({ctx}){
     if(!dupLocDate||!dupLocSource){alert(t("Select a date and source location.","தேதி மற்றும் மூல இடத்தை தேர்வு செய்யவும்."));return;}
     if(!dupLocTargets.length){alert(t("Select at least one target location.","குறைந்தது ஒரு இடத்தையாவது தேர்வு செய்யவும்."));return;}
     const srcLocId=+dupLocSource;
-    const sourceOrders=orders.filter(o=>!o.isTemplate&&o.date===dupLocDate&&(o.entries||[]).some(e=>e.locId===srcLocId));
-    if(!sourceOrders.length){alert(t("No orders found for that date and location.","அந்த தேதி / இடத்திற்கு ஆர்டர் இல்லை."));return;}
+    const sourceOrders=orders.filter(o=>!o.isTemplate&&o.date===dupLocDate&&(o.entries||[]).some(e=>e.locId===srcLocId&&(dupLocSess==="All"||e.session===dupLocSess)));
+    if(!sourceOrders.length){alert(t("No orders found for that date, location, and session.","அந்த தேதி / இடம் / அமர்வுக்கு ஆர்டர் இல்லை."));return;}
     const newOrders=[]; let idc=Date.now();
     dupLocTargets.forEach(targetId=>{
       sourceOrders.forEach(o=>{
-        const entries=(o.entries||[]).filter(e=>e.locId===srcLocId).map(e=>({...e,locId:targetId}));
+        const entries=(o.entries||[]).filter(e=>e.locId===srcLocId&&(dupLocSess==="All"||e.session===dupLocSess)).map(e=>({...e,locId:targetId}));
         if(!entries.length)return;
         newOrders.push({id:idc++,name:o.name,date:dupLocDate,isTemplate:false,pax:"",entries});
       });
@@ -1970,20 +1972,20 @@ function OrdersPage({ctx}){
   const dupRepEntryCount=locId=>orders
     .filter(o=>!o.isTemplate&&o.date===dupRepSourceDate)
     .flatMap(o=>o.entries||[])
-    .filter(e=>e.locId===locId).length;
+    .filter(e=>e.locId===locId&&(dupRepSess==="All"||e.session===dupRepSess)).length;
 
   const duplicateRepeatDaily=()=>{
     if(!dupRepSourceDate||!dupRepSourceLoc){alert(t("Select a source date and location.","மூல தேதி மற்றும் இடத்தை தேர்வு செய்யவும்."));return;}
     const srcLocId=+dupRepSourceLoc;
-    const sourceOrders=orders.filter(o=>!o.isTemplate&&o.date===dupRepSourceDate&&(o.entries||[]).some(e=>e.locId===srcLocId));
-    if(!sourceOrders.length){alert(t("No orders found for that date and location.","அந்த தேதி / இடத்திற்கு ஆர்டர் இல்லை."));return;}
+    const sourceOrders=orders.filter(o=>!o.isTemplate&&o.date===dupRepSourceDate&&(o.entries||[]).some(e=>e.locId===srcLocId&&(dupRepSess==="All"||e.session===dupRepSess)));
+    if(!sourceOrders.length){alert(t("No orders found for that date, location, and session.","அந்த தேதி / இடம் / அமர்வுக்கு ஆர்டர் இல்லை."));return;}
     const days=Math.max(1,Math.min(366,+dupRepDays||1));
     const newOrders=[]; let idc=Date.now();
     for(let i=0;i<days;i++){
       const d=new Date(dupRepStart); d.setDate(d.getDate()+i);
       const dateStr=d.toISOString().slice(0,10);
       sourceOrders.forEach(o=>{
-        const entries=(o.entries||[]).filter(e=>e.locId===srcLocId).map(e=>({...e}));
+        const entries=(o.entries||[]).filter(e=>e.locId===srcLocId&&(dupRepSess==="All"||e.session===dupRepSess)).map(e=>({...e}));
         if(!entries.length)return;
         newOrders.push({id:idc++,name:o.name,date:dateStr,isTemplate:false,pax:"",entries});
       });
@@ -2112,6 +2114,18 @@ function OrdersPage({ctx}){
                 {dupLocSource&&dupLocEntryCount(+dupLocSource)===0&&<div style={{fontSize:11,color:P.danger,paddingBottom:8}}>{t("This location has no orders on the selected date — pick a different date or location.","இந்த இடத்திற்கு இந்த தேதியில் ஆர்டர் இல்லை.")}</div>}
               </div>
               <div style={{marginBottom:10}}>
+                <label style={css.lbl}>{t("Session","அமர்வு")}</label>
+                <div style={{display:"flex",gap:4}}>
+                  {["All",...SESSIONS].map(s=>(
+                    <button key={s} style={{...css.btn(dupLocSess===s?"primary":"ghost",true),
+                      borderColor:s!=="All"?(SCOLOR[s]||P.muted):"#DCC88A",
+                      color:dupLocSess===s?"white":(s!=="All"?SCOLOR[s]:P.deepBrown),
+                      background:dupLocSess===s?(SCOLOR[s]||P.saffron):"transparent",
+                    }} onClick={()=>setDupLocSess(s)}>{s==="All"?t("All","அனைத்தும்"):s}</button>
+                  ))}
+                </div>
+              </div>
+              <div style={{marginBottom:10}}>
                 <label style={css.lbl}>{t("Copy to these locations","இந்த இடங்களுக்கு நகலெடு")}</label>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   {locations.filter(l=>l.id!==+dupLocSource).map(l=>(
@@ -2151,6 +2165,18 @@ function OrdersPage({ctx}){
                 </div>
               </div>
               {dupRepSourceLoc&&dupRepEntryCount(+dupRepSourceLoc)===0&&<div style={{fontSize:11,color:P.danger,marginBottom:10}}>{t("This location has no orders on the source date — pick a different date or location.","இந்த இடத்திற்கு இந்த தேதியில் ஆர்டர் இல்லை.")}</div>}
+              <div style={{marginBottom:10}}>
+                <label style={css.lbl}>{t("Session","அமர்வு")}</label>
+                <div style={{display:"flex",gap:4}}>
+                  {["All",...SESSIONS].map(s=>(
+                    <button key={s} style={{...css.btn(dupRepSess===s?"primary":"ghost",true),
+                      borderColor:s!=="All"?(SCOLOR[s]||P.muted):"#DCC88A",
+                      color:dupRepSess===s?"white":(s!=="All"?SCOLOR[s]:P.deepBrown),
+                      background:dupRepSess===s?(SCOLOR[s]||P.saffron):"transparent",
+                    }} onClick={()=>setDupRepSess(s)}>{s==="All"?t("All","அனைத்தும்"):s}</button>
+                  ))}
+                </div>
+              </div>
               <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
                 <div>
                   <label style={css.lbl}>{t("Repeat starting from","இதிலிருந்து தொடங்கு")}</label>
