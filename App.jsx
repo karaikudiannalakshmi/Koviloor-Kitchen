@@ -688,11 +688,16 @@ function IngsPage({ctx}){
     XLSX.writeFile(wb,"ingredients_export.xlsx");
   };
 
-  const visible=cat==="all"?ingredients:ingredients.filter(i=>i.category===cat);
+  const [ingSearch,setIngSearch]=useState("");
+  const visible=(cat==="all"?ingredients:ingredients.filter(i=>i.category===cat))
+    .filter(i=>{
+      const q=ingSearch.trim().toLowerCase();
+      return !q||i.name.toLowerCase().includes(q)||(i.nameTamil||"").toLowerCase().includes(q);
+    });
 
   const [ingPageNum,setIngPageNum]=useState(1);
   const [ingPageSize,setIngPageSize]=useState(20);
-  useEffect(()=>{setIngPageNum(1);},[cat,ingPageSize]);
+  useEffect(()=>{setIngPageNum(1);},[cat,ingSearch,ingPageSize]);
   const ingTotalPages=Math.max(1,Math.ceil(visible.length/ingPageSize));
   const pagedVisible=visible.slice((ingPageNum-1)*ingPageSize,ingPageNum*ingPageSize);
 
@@ -717,6 +722,8 @@ function IngsPage({ctx}){
             {f==="all"?t("All","அனைத்தும்"):f==="cut"?"✂️ "+t("Cut Veg","நறுக்கிய காய்"):f.charAt(0).toUpperCase()+f.slice(1)}
           </button>
         ))}
+        <input style={{...css.inp,maxWidth:200}} placeholder={t("Search ingredient...","பொருள் தேடு...")} value={ingSearch} onChange={e=>setIngSearch(e.target.value)}/>
+        {ingSearch&&<button style={css.btn("ghost",true)} onClick={()=>setIngSearch("")}>✕</button>}
         <div style={{marginLeft:"auto",display:"flex",gap:6,flexWrap:"wrap"}}>
           <button style={{...css.btn(showDupes?"primary":"ghost",true),
             borderColor:dupGroups.length?P.danger:"#DCC88A",color:showDupes?undefined:(dupGroups.length?P.danger:P.deepBrown)}}
