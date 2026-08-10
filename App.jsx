@@ -2950,6 +2950,9 @@ function RepShop({ctx}){
   const [toDate,setToDate]=useState(TODAY);
   const [locFilter,setLocFilter]=useState([]); // empty = all locations
   const toggleLocFilter=id=>setLocFilter(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+  const selectedLocLabel=!locFilter.length
+    ?t("All Locations","அனைத்து இடங்கள்")
+    :locFilter.map(id=>locations.find(l=>l.id===id)).filter(Boolean).map(l=>rLang==="en"?l.name:l.nameTamil).join(", ");
   // Ingredients to exclude from purchase order (AC pre-cut veg, Milk, derived/intermediate items, etc.)
   const EXCLUDE_PREFIXES=["AC ","AC-"];
   const EXCLUDE_NAMES=["milk","milk- milk","water for dal","water","tamarind juice","tomato juice","mavu-arisi mavu weight","mavu-ulunthu mavu wt"];
@@ -3023,6 +3026,39 @@ function RepShop({ctx}){
     return {byDate,combined,allIngs};
   };
 
+  // Location-columnar breakdown: one column per location, summed across the whole date range
+  const buildLocationData=(sessFilter)=>{
+    const byLocRaw={}; // ingId -> { locId: qty }
+    const usedLocIds=new Set();
+    sortedDates.forEach(dt=>{
+      const ents=orders.filter(o=>!o.isTemplate&&o.date===dt)
+        .flatMap(o=>o.entries
+          .filter(e=>(sessFilter==="All"||e.session===sessFilter)&&(!locFilter.length||locFilter.includes(e.locId)))
+          .map(e=>({...e,_order:o})));
+      const byLoc={};
+      ents.forEach(e=>{if(!byLoc[e.locId])byLoc[e.locId]=[];byLoc[e.locId].push(e);});
+      Object.entries(byLoc).forEach(([locIdStr,locEnts])=>{
+        const locId=+locIdStr;
+        computeTotals(locEnts,recipes,ingredients).forEach(r=>{
+          const baseUnit=r.d.unit||r.unit;
+          const qty=cvtUnit(r.qty,r.unit,baseUnit);
+          if(!byLocRaw[r.d.id])byLocRaw[r.d.id]={};
+          byLocRaw[r.d.id][locId]=(byLocRaw[r.d.id][locId]||0)+qty;
+          usedLocIds.add(locId);
+        });
+      });
+    });
+    const locCols=locations.filter(l=>usedLocIds.has(l.id));
+    const allIngIds=Object.keys(byLocRaw).map(Number);
+    const allIngs=allIngIds
+      .map(id=>ingredients.find(x=>x.id===id)).filter(Boolean)
+      .filter(ing=>!isExcluded(ing))
+      .sort((a,b)=>CATS.indexOf(a.category)-CATS.indexOf(b.category)||a.name.localeCompare(b.name));
+    return {byLoc:byLocRaw,locCols,allIngs};
+  };
+
+  const round2=v=>Math.round((+v||0)*100)/100;
+
   const exportPurchaseOrder=()=>{
     const {allIngs,combined,byDate}=buildData("All");
     if(!allIngs.length){alert("No ingredients found for selected dates.");return;}
@@ -3045,7 +3081,7 @@ function RepShop({ctx}){
     // Helper to get Excel column letter
     const colLetter=n=>{let s="";while(n>0){s=String.fromCharCode(64+(n%26||26))+s;n=Math.floor((n-1)/26);}return s;};
 
-    let rowNum=2; // start after header row
+    let rowNum=3; // start after banner row (1) and header row (2)
 
     CATS.forEach(cat=>{
       const ings=allIngs.filter(x=>x.category===cat);
@@ -3082,7 +3118,8 @@ function RepShop({ctx}){
       rows.push(blankRow); rowNum++;
     });
 
-    const ws=XLSX.utils.json_to_sheet(rows);
+    const ws=XLSX.utils.json_to_sheet(rows,{origin:"A2"});
+    XLSX.utils.sheet_add_aoa(ws,[[t("Locations","இடங்கள்")+": "+selectedLocLabel+"   |   "+t("Dates","தேதிகள்")+": "+dateLabel]],{origin:"A1"});
     // Style-ish: set column widths
     ws["!cols"]=[{wch:30},{wch:8},...dateCols.map(()=>({wch:10})),{wch:14},{wch:14},{wch:12}];
     const wb=XLSX.utils.book_new();
@@ -3094,6 +3131,7 @@ function RepShop({ctx}){
     const {byDate,combined,allIngs}=buildData(sessFilter);
     if(!allIngs.length)return;
     const rows=[];
+    rows.push({Category:t("Locations","இடங்கள்")+": "+selectedLocLabel,[t("Ingredient","பொருள்")]:"",Unit:""});
     // Column layout: Category | Ingredient | date cols... | Total | Unit | In Stock | To Buy
     CATS.forEach((cat,ci)=>{
       const ings=allIngs.filter(x=>x.category===cat);
@@ -3124,8 +3162,48 @@ function RepShop({ctx}){
 
   // Active session tab
   const [activeTab,setActiveTab]=useState("All");
+  const [viewMode,setViewMode]=useState("date"); // "date" | "location"
   const {byDate,combined,allIngs}=useMemo(()=>buildData(activeTab),[activeTab,sortedDates,orders,recipes,ingredients,locFilter]);
-  const hasData=allIngs.length>0;
+  const {byLoc,locCols,allIngs:locAllIngs}=useMemo(()=>buildLocationData(activeTab),[activeTab,sortedDates,orders,recipes,ingredients,locFilter]);
+  const hasData=viewMode==="date"?allIngs.length>0:locAllIngs.length>0;
+
+  const doLocExport=()=>{
+    const rows=[];
+    rows.push({Category:t("Locations","இடங்கள்")+": "+selectedLocLabel+"   |   "+t("Dates","தேதிகள்")+": "+sortedDates[0]+(sortedDates.length>1?" – "+sortedDates[sortedDates.length-1]:""),[t("Ingredient","பொருள்")]:"",Unit:""});
+    CATS.forEach((cat,ci)=>{
+      const ings=locAllIngs.filter(x=>x.category===cat);
+      if(!ings.length)return;
+      const headRow={Category:"▶ "+CATLABEL[cat].toUpperCase(),[t("Ingredient","பொருள்")]:"",Unit:""};
+      locCols.forEach(l=>{headRow[l.name]="";});
+      headRow["Total"]="";
+      rows.push(headRow);
+      ings.forEach(ing=>{
+        const row={Category:"",[t("Ingredient","பொருள்")]:n(ing),Unit:ing.unit};
+        let total=0;
+        locCols.forEach(l=>{const v=byLoc[ing.id]?.[l.id]||0;row[l.name]=v?round2(v):"";total+=v;});
+        row["Total"]=round2(total);
+        rows.push(row);
+      });
+      if(ci<CATS.length-1)rows.push({Category:"",[t("Ingredient","பொருள்")]:"",Unit:""});
+    });
+    exportXlsxSheets("shopping_by_location_"+sortedDates[0]+(sortedDates.length>1?"_to_"+sortedDates[sortedDates.length-1]:"")+".xlsx",[{name:"By Location",data:rows}]);
+  };
+
+  const doLocPrint=()=>{
+    const colHeaders=locCols.map(l=>"<th style='text-align:right'>"+n(l)+"</th>").join("");
+    const catBlocks=CATS.map(cat=>{
+      const ings=locAllIngs.filter(x=>x.category===cat);
+      if(!ings.length)return "";
+      const rows=ings.map(ing=>{
+        let total=0;
+        const cells=locCols.map(l=>{const v=byLoc[ing.id]?.[l.id]||0;total+=v;return "<td style='text-align:right'>"+(v?round2(v)+" "+ing.unit:"—")+"</td>";}).join("");
+        return "<tr><td><strong>"+n(ing)+"</strong></td>"+cells+"<td style='text-align:right;background:#fffbe8'><strong>"+round2(total)+" "+ing.unit+"</strong></td></tr>";
+      }).join("");
+      return "<h3>"+CATICON[cat]+" "+CATLABEL[cat]+"</h3><table><thead><tr><th>"+t("Ingredient","பொருள்")+"</th>"+colHeaders+"<th>"+t("Total","மொத்தம்")+"</th></tr></thead><tbody>"+rows+"</tbody></table>";
+    }).join("");
+    printHTML("Shopping List by Location ("+sortedDates[0]+(sortedDates.length>1?" to "+sortedDates[sortedDates.length-1]:"")+")",
+      "<p style='color:#9B7355;margin:0 0 12px;font-size:12px'>"+t("Locations","இடங்கள்")+": "+selectedLocLabel+" &nbsp;|&nbsp; "+t("Dates","தேதிகள்")+": "+sortedDates.join(" · ")+"</p>"+catBlocks);
+  };
 
   return(
     <div>
@@ -3175,13 +3253,22 @@ function RepShop({ctx}){
         ))}
       </div>
 
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        <button style={css.btn(viewMode==="date"?"primary":"ghost",true)} onClick={()=>setViewMode("date")}>📅 {t("By Date","தேதி வாரியாக")}</button>
+        <button style={css.btn(viewMode==="location"?"primary":"ghost",true)} onClick={()=>setViewMode("location")}>📍 {t("By Location","இடம் வாரியாக")}</button>
+      </div>
+
+      <div style={{background:"#FFF8EC",border:"1px solid #EDD9A3",borderRadius:8,padding:"8px 14px",marginBottom:12,fontSize:12,color:P.deepBrown}}>
+        📍 <strong>{t("Locations","இடங்கள்")}:</strong> {selectedLocLabel} &nbsp;|&nbsp; 📅 <strong>{t("Dates","தேதிகள்")}:</strong> {sortedDates[0]}{sortedDates.length>1?" – "+sortedDates[sortedDates.length-1]:""}
+      </div>
+
       {!hasData&&(
         <div style={{color:P.muted,textAlign:"center",padding:32}}>
           {t("No orders for the selected dates / session.","தேர்ந்த தேதிகளில் ஆர்டர் இல்லை.")}
         </div>
       )}
 
-      {hasData&&(
+      {hasData&&viewMode==="date"&&(
         <>
           {/* Print/Export buttons for this session */}
           <div style={{display:"flex",gap:6,justifyContent:"flex-end",marginBottom:10}}>
@@ -3212,7 +3299,7 @@ function RepShop({ctx}){
               }).join("");
               const label=activeTab==="All"?t("All Sessions","அனைத்து அமர்வு"):activeTab;
               printHTML("Shopping List — "+label+" ("+sortedDates.join(", ")+")",
-                "<p style='color:#9B7355;margin:0 0 12px;font-size:12px'>"+t("Session","அமர்வு")+": "+label+" | "+t("Dates","தேதிகள்")+": "+sortedDates.join(" · ")+"</p>"+catBlocks);
+                "<p style='color:#9B7355;margin:0 0 12px;font-size:12px'>"+t("Locations","இடங்கள்")+": "+selectedLocLabel+" | "+t("Session","அமர்வு")+": "+label+" | "+t("Dates","தேதிகள்")+": "+sortedDates.join(" · ")+"</p>"+catBlocks);
             }}>🖨 {t("Print","அச்சு")}</button>
           </div>
 
@@ -3263,6 +3350,59 @@ function RepShop({ctx}){
                               <strong style={{color:toBuy>0?P.danger:P.success}}>
                                 {toBuy>0?toBuy.toFixed(2)+" "+unit:"✓ OK"}
                               </strong>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {hasData&&viewMode==="location"&&(
+        <>
+          <div style={{display:"flex",gap:6,justifyContent:"flex-end",marginBottom:10}}>
+            <button style={css.btn("ghost",true)} onClick={doLocExport}>📥 {t("Excel","எக்செல்")}</button>
+            <button style={css.btn("primary",true)} onClick={doLocPrint}>🖨 {t("Print","அச்சு")}</button>
+          </div>
+          {CATS.map(cat=>{
+            const ings=locAllIngs.filter(x=>x.category===cat);
+            if(!ings.length)return null;
+            return(
+              <div key={cat} style={css.card}>
+                <div style={css.sHead}>{CATICON[cat]} {CATLABEL[cat]}</div>
+                <div style={{overflowX:"auto"}}>
+                  <table style={css.table}>
+                    <thead>
+                      <tr>
+                        <th style={{...css.th,paddingLeft:0,background:"transparent",color:P.muted,fontSize:10,fontWeight:400}}>{t("Name","பெயர்")}</th>
+                        {locCols.map(l=>(
+                          <th key={l.id} style={{...css.th,textAlign:"right",minWidth:90}}>{n(l)}</th>
+                        ))}
+                        <th style={{...css.th,textAlign:"right",background:"#7C4A00",minWidth:80}}>{t("Total","மொத்தம்")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ings.map((ing,i)=>{
+                        let total=0;
+                        return(
+                          <tr key={ing.id} style={{background:i%2===0?P.white:P.highlight}}>
+                            <td style={{...css.td,paddingLeft:0}}><strong style={{fontSize:13}}>{n(ing)}</strong></td>
+                            {locCols.map(l=>{
+                              const v=byLoc[ing.id]?.[l.id]||0;
+                              total+=v;
+                              return(
+                                <td key={l.id} style={{...css.td,textAlign:"right",color:v?P.deepBrown:"#CCC"}}>
+                                  {v?round2(v)+" "+ing.unit:"—"}
+                                </td>
+                              );
+                            })}
+                            <td style={{...css.td,textAlign:"right",background:"#FFFBE8"}}>
+                              <strong>{round2(total)+" "+ing.unit}</strong>
                             </td>
                           </tr>
                         );
