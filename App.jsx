@@ -3988,6 +3988,8 @@ function PoojaTemplesPage({ctx}){
   const [form,setForm]=useState({name:"",nameTamil:"",location:"",contact:""});
   const [openId,setOpenId]=useState(null);
   const [selDay,setSelDay]=useState("monday");
+  const [schedMode,setSchedMode]=useState("weekly"); // "weekly" | "monthly"
+  const [selDom,setSelDom]=useState("1"); // day of month, 1-31
 
   const DAYS=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
   const DAY_LABEL={monday:"Mon",tuesday:"Tue",wednesday:"Wed",thursday:"Thu",friday:"Fri",saturday:"Sat",sunday:"Sun"};
@@ -3996,29 +3998,33 @@ function PoojaTemplesPage({ctx}){
   const SLOT_COLOR={morning:"#1a5276",afternoon:"#784212",evening:"#1a237e"};
   const SLOT_ICON={morning:"🌅",afternoon:"☀️",evening:"🌙"};
   const dayN=(d)=>lang==="en"?DAY_LABEL[d]:DAY_LABEL_TA[d];
+  const DOM_OPTIONS=Array.from({length:31},(_,i)=>String(i+1));
 
   const addTemple=()=>{
     if(!form.name.trim())return;
     setPoojaTemples(p=>[...p,{id:Date.now(),name:form.name.trim(),nameTamil:form.nameTamil.trim(),
-      location:form.location.trim(),contact:form.contact.trim(),schedule:{}}]);
+      location:form.location.trim(),contact:form.contact.trim(),schedule:{},monthlySchedule:{}}]);
     setForm({name:"",nameTamil:"",location:"",contact:""});
   };
   const delTemple=(id)=>{if(confirm(t("Delete this temple?","நீக்கவா?")))setPoojaTemples(p=>p.filter(x=>x.id!==id));};
 
-  // Get qty for a slot
-  const getQty=(temple,itemId,day,slot)=>{
-    return (temple.schedule?.[itemId]?.[day]?.[slot])||"";
+  const schedField=schedMode==="weekly"?"schedule":"monthlySchedule";
+  const selKey=schedMode==="weekly"?selDay:selDom;
+
+  // Get qty for a slot (works for either weekly "schedule" or monthly "monthlySchedule")
+  const getQty=(temple,itemId,key,slot)=>{
+    return (temple[schedField]?.[itemId]?.[key]?.[slot])||"";
   };
 
   // Set qty for a slot
-  const setQty=(templeId,itemId,day,slot,val)=>{
+  const setQty=(templeId,itemId,key,slot,val)=>{
     setPoojaTemples(p=>p.map(tm=>{
       if(tm.id!==templeId)return tm;
-      const sch={...tm.schedule};
+      const sch={...(tm[schedField]||{})};
       if(!sch[itemId])sch[itemId]={};
-      if(!sch[itemId][day])sch[itemId][day]={morning:"",afternoon:"",evening:""};
-      sch[itemId]={...sch[itemId],[day]:{...sch[itemId][day],[slot]:val}};
-      return{...tm,schedule:sch};
+      if(!sch[itemId][key])sch[itemId][key]={morning:"",afternoon:"",evening:""};
+      sch[itemId]={...sch[itemId],[key]:{...sch[itemId][key],[slot]:val}};
+      return{...tm,[schedField]:sch};
     }));
   };
 
@@ -4026,7 +4032,7 @@ function PoojaTemplesPage({ctx}){
     <div>
       <div style={css.card}>
         <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700,color:P.deepBrown,marginBottom:12}}>
-          🛕 {t("Temples & Weekly Schedule","கோவில்கள் & வாராந்திர அட்டவணை")}
+          🛕 {t("Temples & Schedule","கோவில்கள் & அட்டவணை")}
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10,marginBottom:10}}>
           <div><label style={css.lbl}>{t("Temple Name","கோவில் பெயர்")}</label>
@@ -4079,17 +4085,37 @@ function PoojaTemplesPage({ctx}){
                   </div>
                 ):(
                   <>
-                    {/* Day tabs */}
-                    <div style={{display:"flex",gap:4,marginBottom:12,flexWrap:"wrap"}}>
-                      <span style={{fontSize:12,color:P.muted,paddingTop:6,marginRight:4}}>{t("Day:","நாள்:")}</span>
-                      {DAYS.map(d=>(
-                        <button key={d} style={{...css.btn(selDay===d?"primary":"ghost",true),
-                          minWidth:44,padding:"5px 10px",fontSize:12,
-                          borderColor:d==="friday"||d==="saturday"?P.saffron:"#DCC88A"}}>
-                          <span onClick={()=>setSelDay(d)}>{dayN(d)}</span>
-                        </button>
-                      ))}
+                    {/* Weekly / Monthly mode toggle */}
+                    <div style={{display:"flex",gap:6,marginBottom:10}}>
+                      <button style={css.btn(schedMode==="weekly"?"primary":"ghost",true)} onClick={()=>setSchedMode("weekly")}>
+                        📅 {t("Weekly","வாராந்திர")}
+                      </button>
+                      <button style={css.btn(schedMode==="monthly"?"primary":"ghost",true)} onClick={()=>setSchedMode("monthly")}>
+                        🗓️ {t("Monthly","மாதாந்திர")}
+                      </button>
                     </div>
+
+                    {/* Day tabs (weekly) or day-of-month dropdown (monthly) */}
+                    {schedMode==="weekly"?(
+                      <div style={{display:"flex",gap:4,marginBottom:12,flexWrap:"wrap"}}>
+                        <span style={{fontSize:12,color:P.muted,paddingTop:6,marginRight:4}}>{t("Day:","நாள்:")}</span>
+                        {DAYS.map(d=>(
+                          <button key={d} style={{...css.btn(selDay===d?"primary":"ghost",true),
+                            minWidth:44,padding:"5px 10px",fontSize:12,
+                            borderColor:d==="friday"||d==="saturday"?P.saffron:"#DCC88A"}}>
+                            <span onClick={()=>setSelDay(d)}>{dayN(d)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ):(
+                      <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12}}>
+                        <span style={{fontSize:12,color:P.muted}}>{t("Day of month:","மாத தேதி:")}</span>
+                        <select style={{...css.sel,width:100}} value={selDom} onChange={e=>setSelDom(e.target.value)}>
+                          {DOM_OPTIONS.map(d=><option key={d} value={d}>{d}</option>)}
+                        </select>
+                        <span style={{fontSize:11,color:P.muted}}>{t("(e.g. 5 = the 5th of every month)","(எ.கா. 5 = ஒவ்வொரு மாதமும் 5ம் தேதி)")}</span>
+                      </div>
+                    )}
 
                     {/* Item schedule table */}
                     <div style={{overflowX:"auto"}}>
@@ -4112,7 +4138,7 @@ function PoojaTemplesPage({ctx}){
                               </td>
                               <td style={css.td}><span style={css.badge(P.muted)}>{pi.unit}</span></td>
                               {SLOTS.map(slot=>{
-                                const val=getQty(temple,pi.id,selDay,slot);
+                                const val=getQty(temple,pi.id,selKey,slot);
                                 return(
                                   <td key={slot} style={{...css.td,textAlign:"center",padding:"4px 8px"}}>
                                     <input type="number" min="0" step="0.5"
@@ -4122,7 +4148,7 @@ function PoojaTemplesPage({ctx}){
                                         fontWeight:val?700:400}}
                                       value={val}
                                       placeholder="—"
-                                      onChange={e=>setQty(temple.id,pi.id,selDay,slot,e.target.value)}/>
+                                      onChange={e=>setQty(temple.id,pi.id,selKey,slot,e.target.value)}/>
                                   </td>
                                 );
                               })}
@@ -4164,13 +4190,17 @@ function PoojaDispatchPage({ctx}){
   ];
 
   const dayKey=getDayOfWeek(dt);
+  const domKey=String(new Date(dt).getDate());
 
-  // Get scheduled qty — reads from temple.schedule[itemId][day][slot] (new structure)
+  // Get scheduled qty — merges weekly (day-of-week) and monthly (day-of-month) schedules
   const getQty=(templeId,itemId,slot)=>{
     const oKey=`${templeId}_${itemId}_${slot}`;
     if(overrides[oKey]!==undefined)return overrides[oKey];
     const temple=poojaTemples.find(t=>t.id===templeId);
-    return (temple?.schedule?.[itemId]?.[dayKey]?.[slot])||"";
+    const wk=+(temple?.schedule?.[itemId]?.[dayKey]?.[slot])||0;
+    const mo=+(temple?.monthlySchedule?.[itemId]?.[domKey]?.[slot])||0;
+    const sum=wk+mo;
+    return sum||"";
   };
 
   const setQty=(templeId,itemId,slot,val)=>{
@@ -4195,7 +4225,7 @@ function PoojaDispatchPage({ctx}){
 
   const activeTemples=poojaTemples.filter(tm=>
     poojaItems.some(pi=>
-      SLOTS.some(s=>(tm.schedule?.[pi.id]?.[dayKey]?.[s.key])||overrides[`${tm.id}_${pi.id}_${s.key}`])
+      SLOTS.some(s=>(tm.schedule?.[pi.id]?.[dayKey]?.[s.key])||(tm.monthlySchedule?.[pi.id]?.[domKey]?.[s.key])||overrides[`${tm.id}_${pi.id}_${s.key}`])
     )
   );
 
@@ -4387,13 +4417,15 @@ function PoojaSendPage({ctx}){
     {key:"evening",label:t("Evening","மாலை"),icon:"🌙"},
   ];
 
-  // Build: temple -> slot -> [{item,qty}]
+  // Build: temple -> slot -> [{item,qty}]  (merges weekly day-of-week + monthly day-of-month schedules)
+  const domKey=String(new Date(dt).getDate());
   const templeSections=poojaTemples.map(tm=>{
     const slots=SLOTS.map(sl=>{
       const items=poojaItems
         .map(pi=>{
-          const dd=tm.schedule?.[pi.id]?.[dayKey]||{};
-          const qty=+dd[sl.key]||0;
+          const wk=tm.schedule?.[pi.id]?.[dayKey]||{};
+          const mo=tm.monthlySchedule?.[pi.id]?.[domKey]||{};
+          const qty=(+wk[sl.key]||0)+(+mo[sl.key]||0);
           return qty>0?{item:pi,qty}:null;
         })
         .filter(Boolean);
@@ -4757,13 +4789,16 @@ function PoojaWeeklyShopPage({ctx}){
     const columns=[...templeCols,...occCols];
 
     const data={}; // itemId -> { colKey: qty }
-    // Temple recurring schedule, expanded across each date in range
+    // Temple recurring weekly schedule, expanded across each date in range
     sortedDates.forEach(dt=>{
       const dow=DAYS[new Date(dt).getDay()];
+      const dom=String(new Date(dt).getDate());
       poojaTemples.forEach(tm=>{
         poojaItems.forEach(pi=>{
-          const dd=tm.schedule?.[pi.id]?.[dow]||{};
-          const sum=(+dd.morning||0)+(+dd.afternoon||0)+(+dd.evening||0);
+          const wk=tm.schedule?.[pi.id]?.[dow]||{};
+          const mo=tm.monthlySchedule?.[pi.id]?.[dom]||{};
+          const sum=(+wk.morning||0)+(+wk.afternoon||0)+(+wk.evening||0)
+                   +(+mo.morning||0)+(+mo.afternoon||0)+(+mo.evening||0);
           if(!sum)return;
           if(!data[pi.id])data[pi.id]={};
           const key="tm_"+tm.id;
@@ -4829,7 +4864,7 @@ function PoojaWeeklyShopPage({ctx}){
         <div style={{fontSize:11,color:P.muted,paddingBottom:6}}>{sortedDates.length} {t("day(s)","நாள்")}</div>
       </ReportBar>
       <div style={{fontSize:11,color:P.muted,marginBottom:10}}>
-        {t("Combines each temple's recurring weekly schedule with any one-off occasion orders (Moolam, Pradosham, etc.) whose date falls in this range.","கோவில்களின் வார அட்டவணை மற்றும் இந்த வரம்பில் உள்ள சிறப்பு நாள் ஆர்டர்களை (மூலம், பிரதோஷம்) இணைக்கிறது.")}
+        {t("Combines each temple's recurring weekly and monthly schedules with any one-off occasion orders (Moolam, Pradosham, etc.) whose date falls in this range.","கோவில்களின் வார/மாத அட்டவணை மற்றும் இந்த வரம்பில் உள்ள சிறப்பு நாள் ஆர்டர்களை (மூலம், பிரதோஷம்) இணைக்கிறது.")}
       </div>
       {!hasData?(
         <div style={{color:P.muted,textAlign:"center",padding:32}}>{t("No items scheduled or ordered in this date range.","இந்த வரம்பில் பொருட்கள் இல்லை.")}</div>
