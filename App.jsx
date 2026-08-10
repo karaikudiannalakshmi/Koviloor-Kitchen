@@ -1900,7 +1900,7 @@ function OrdersPage({ctx}){
       const entries=(o.entries||[]).filter(e=>dupSess==="All"||e.session===dupSess);
       if(!entries.length)return;
       const newEntries=entries.map(e=>({...e}));
-      copies.push({...o,id:Date.now()+i,date:dupTo,name:genOrderName(dupTo,newEntries),entries:newEntries});
+      copies.push({...o,id:Date.now()+i,date:dupTo,name:o.name,entries:newEntries});
     });
     if(!copies.length){alert(t("No entries found for that date and session.","அந்த தேதி / அமர்வுக்கு பதிவுகள் இல்லை."));return;}
     setOrders(p=>[...p,...copies]);
@@ -1929,7 +1929,7 @@ function OrdersPage({ctx}){
     const copies=source.map((o,i)=>{
       const newDate=new Date(new Date(o.date).getTime()+offsetMs).toISOString().slice(0,10);
       const newEntries=(o.entries||[]).map(en=>({...en}));
-      return{...o,id:Date.now()+i,date:newDate,name:genOrderName(newDate,newEntries),entries:newEntries};
+      return{...o,id:Date.now()+i,date:newDate,name:o.name,entries:newEntries};
     });
     setOrders(p=>[...p,...copies]);
     setDupOpen(false);
@@ -1957,7 +1957,7 @@ function OrdersPage({ctx}){
       sourceOrders.forEach(o=>{
         const entries=(o.entries||[]).filter(e=>e.locId===srcLocId).map(e=>({...e,locId:targetId}));
         if(!entries.length)return;
-        newOrders.push({id:idc++,name:genOrderName(dupLocDate,entries),date:dupLocDate,isTemplate:false,pax:"",entries});
+        newOrders.push({id:idc++,name:o.name,date:dupLocDate,isTemplate:false,pax:"",entries});
       });
     });
     setOrders(p=>[...p,...newOrders]);
@@ -1985,7 +1985,7 @@ function OrdersPage({ctx}){
       sourceOrders.forEach(o=>{
         const entries=(o.entries||[]).filter(e=>e.locId===srcLocId).map(e=>({...e}));
         if(!entries.length)return;
-        newOrders.push({id:idc++,name:genOrderName(dateStr,entries),date:dateStr,isTemplate:false,pax:"",entries});
+        newOrders.push({id:idc++,name:o.name,date:dateStr,isTemplate:false,pax:"",entries});
       });
     }
     setOrders(p=>[...p,...newOrders]);
