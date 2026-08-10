@@ -1933,10 +1933,12 @@ function OrdersPage({ctx}){
     alert(copies.length+" "+t("order(s) duplicated, shifted to start","ஆர்டர்(கள்) நகலெடுக்கப்பட்டன, தொடங்கும்")+" "+dupRangeTarget+" ("+t("through","வரை")+" "+lastDate+")");
   };
 
-  // Locations actually used on the selected duplicate-source date
-  const dupLocSourceOptions=locations.filter(l=>
-    orders.some(o=>!o.isTemplate&&o.date===dupLocDate&&(o.entries||[]).some(e=>e.locId===l.id))
-  );
+  // All locations are selectable as source; annotate with how many entries exist on the picked date
+  const dupLocEntryCount=locId=>orders
+    .filter(o=>!o.isTemplate&&o.date===dupLocDate)
+    .flatMap(o=>o.entries||[])
+    .filter(e=>e.locId===locId).length;
+  const dupLocSourceOptions=locations;
 
   const toggleDupLocTarget=id=>setDupLocTargets(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
 
@@ -2067,12 +2069,15 @@ function OrdersPage({ctx}){
                 </div>
                 <div>
                   <label style={css.lbl}>{t("Copy from location","இதிலிருந்து நகலெடு")}</label>
-                  <select style={{...css.sel,minWidth:180}} value={dupLocSource} onChange={e=>setDupLocSource(e.target.value)}>
+                  <select style={{...css.sel,minWidth:220}} value={dupLocSource} onChange={e=>setDupLocSource(e.target.value)}>
                     <option value="">{t("Select...","தேர்வு...")}</option>
-                    {dupLocSourceOptions.map(l=><option key={l.id} value={l.id}>{lang==="en"?l.name:l.nameTamil}</option>)}
+                    {dupLocSourceOptions.map(l=>{
+                      const cnt=dupLocEntryCount(l.id);
+                      return <option key={l.id} value={l.id}>{lang==="en"?l.name:l.nameTamil}{cnt?" ("+cnt+" "+t("entries","பதிவுகள்")+")":" — "+t("no orders this date","இந்த தேதியில் இல்லை")}</option>;
+                    })}
                   </select>
                 </div>
-                {!dupLocSourceOptions.length&&<div style={{fontSize:11,color:P.danger,paddingBottom:8}}>{t("No orders found on this date.","இந்த தேதியில் ஆர்டர் இல்லை.")}</div>}
+                {dupLocSource&&dupLocEntryCount(+dupLocSource)===0&&<div style={{fontSize:11,color:P.danger,paddingBottom:8}}>{t("This location has no orders on the selected date — pick a different date or location.","இந்த இடத்திற்கு இந்த தேதியில் ஆர்டர் இல்லை.")}</div>}
               </div>
               <div style={{marginBottom:10}}>
                 <label style={css.lbl}>{t("Copy to these locations","இந்த இடங்களுக்கு நகலெடு")}</label>
