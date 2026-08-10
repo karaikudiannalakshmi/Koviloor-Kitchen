@@ -1776,6 +1776,7 @@ function OrdersPage({ctx}){
   const [dupLocSource,setDupLocSource]=useState("");
   const [dupLocTargets,setDupLocTargets]=useState([]);
   const [dupLocSess,setDupLocSess]=useState("All");
+  const [dupLocTargetPax,setDupLocTargetPax]=useState({}); // {locId: pax}
   const [dupRepSourceDate,setDupRepSourceDate]=useState(TODAY);
   const [dupRepSourceLoc,setDupRepSourceLoc]=useState("");
   const [dupRepStart,setDupRepStart]=useState(TODAY);
@@ -1956,10 +1957,22 @@ function OrdersPage({ctx}){
     if(!sourceOrders.length){alert(t("No orders found for that date, location, and session.","அந்த தேதி / இடம் / அமர்வுக்கு ஆர்டர் இல்லை."));return;}
     const newOrders=[]; let idc=Date.now();
     dupLocTargets.forEach(targetId=>{
+      const targetPax=+dupLocTargetPax[targetId]||null;
       sourceOrders.forEach(o=>{
-        const entries=(o.entries||[]).filter(e=>e.locId===srcLocId&&(dupLocSess==="All"||e.session===dupLocSess)).map(e=>({...e,locId:targetId}));
+        const entries=(o.entries||[]).filter(e=>e.locId===srcLocId&&(dupLocSess==="All"||e.session===dupLocSess)).map(e=>{
+          // If a pax was given for this target and the source entry has a base reference
+          // (falling back to the order's own pax field if the entry itself lacks one),
+          // scale the quantity proportionally instead of just copying the raw number.
+          const srcBasePax=e.basePax||(+o.pax||null);
+          const srcBaseQty=e.baseQty||e.qty;
+          if(targetPax&&srcBasePax&&srcBaseQty){
+            const newQty=+(srcBaseQty*(targetPax/srcBasePax)).toFixed(3);
+            return{...e,locId:targetId,qty:newQty,baseQty:newQty,basePax:targetPax};
+          }
+          return{...e,locId:targetId};
+        });
         if(!entries.length)return;
-        newOrders.push({id:idc++,name:o.name,date:dupLocDate,isTemplate:false,pax:"",entries});
+        newOrders.push({id:idc++,name:o.name,date:dupLocDate,isTemplate:false,pax:targetPax||"",entries});
       });
     });
     setOrders(p=>[...p,...newOrders]);
@@ -1967,6 +1980,7 @@ function OrdersPage({ctx}){
     const targetNames=dupLocTargets.map(id=>locations.find(l=>l.id===id)?.name).filter(Boolean).join(", ");
     alert(newOrders.length+" "+t("order(s) created for","ஆர்டர்(கள்) உருவாக்கப்பட்டன")+": "+targetNames);
     setDupLocTargets([]);
+    setDupLocTargetPax({});
   };
 
   const dupRepEntryCount=locId=>orders
@@ -2127,15 +2141,29 @@ function OrdersPage({ctx}){
               </div>
               <div style={{marginBottom:10}}>
                 <label style={css.lbl}>{t("Copy to these locations","இந்த இடங்களுக்கு நகலெடு")}</label>
+                <div style={{fontSize:11,color:P.muted,marginBottom:6}}>
+                  {t("Optionally set a Pax for each — quantities scale proportionally instead of copying the source location's raw numbers. Leave blank to copy as-is.","விருப்பமாக ஒவ்வொன்றிற்கும் பாக்ஸ் அமைக்கவும் — அளவு விகிதாசாரமாக மாறும்.")}
+                </div>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                  {locations.filter(l=>l.id!==+dupLocSource).map(l=>(
-                    <label key={l.id} style={{display:"flex",alignItems:"center",gap:5,fontSize:12,cursor:"pointer",
-                      background:dupLocTargets.includes(l.id)?P.saffron+"22":"white",
-                      border:"1px solid "+(dupLocTargets.includes(l.id)?P.saffron:"#DCC88A"),borderRadius:7,padding:"5px 10px"}}>
-                      <input type="checkbox" checked={dupLocTargets.includes(l.id)} onChange={()=>toggleDupLocTarget(l.id)}/>
-                      {lang==="en"?l.name:l.nameTamil}
-                    </label>
-                  ))}
+                  {locations.filter(l=>l.id!==+dupLocSource).map(l=>{
+                    const checked=dupLocTargets.includes(l.id);
+                    return(
+                      <div key={l.id} style={{display:"flex",alignItems:"center",gap:6,
+                        background:checked?P.saffron+"22":"white",
+                        border:"1px solid "+(checked?P.saffron:"#DCC88A"),borderRadius:7,padding:"5px 10px"}}>
+                        <label style={{display:"flex",alignItems:"center",gap:5,fontSize:12,cursor:"pointer"}}>
+                          <input type="checkbox" checked={checked} onChange={()=>toggleDupLocTarget(l.id)}/>
+                          {lang==="en"?l.name:l.nameTamil}
+                        </label>
+                        {checked&&(
+                          <input type="number" min="0" step="1" placeholder={t("Pax","பாக்ஸ்")}
+                            style={{...css.inp,width:60,padding:"2px 6px",fontSize:12}}
+                            value={dupLocTargetPax[l.id]||""}
+                            onChange={e=>setDupLocTargetPax(p=>({...p,[l.id]:e.target.value}))}/>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
               <div style={{display:"flex",gap:8}}>
@@ -5376,13 +5404,23 @@ function OccOrdersPage({ctx}){
   const [customTplId,setCustomTplId]=useState("");
   const [customDatesText,setCustomDatesText]=useState("");
   const [customMsg,setCustomMsg]=useState("");
-  const bulkCreateCustom=()=>{
-    const tpl=occTemplates.find(x=>x.id===+customTplId);
-    if(!tpl){setCustomMsg(t("Select a template first.","முதலில் மாதிரி தேர்வு செய்யவும்."));return;}
-    const dates=[...new Set(customDatesText.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean))];
-    if(!dates.length){setCustomMsg(t("Paste at least one date (YYYY-MM-DD, one per line or comma-separated).","குறைந்தது ஒரு தேதியையாவது சேர்க்கவும்."));return;}
-    const bad=dates.filter(d=>!/^\d{4}-\d{2}-\d{2}$/.test(d));
-    if(bad.length){setCustomMsg(t("Invalid date format (use YYYY-MM-DD):","தவறான தேதி வடிவம்:")+" "+bad.slice(0,5).join(", "));return;}
+  const customFileRef=useRef();
+
+  // Normalizes a date cell/string from Excel (JS Date object, serial number already
+  // converted by cellDates:true, or a typed string in various formats) to YYYY-MM-DD.
+  const normalizeDateCell=val=>{
+    if(val instanceof Date&&!isNaN(val))return val.toISOString().slice(0,10);
+    const s=(val+"").trim();
+    if(!s)return null;
+    if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
+    let m=s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/); // DD-MM-YYYY or DD/MM/YYYY
+    if(m)return m[3]+"-"+String(m[2]).padStart(2,"0")+"-"+String(m[1]).padStart(2,"0");
+    const d=new Date(s);
+    if(!isNaN(d))return d.toISOString().slice(0,10);
+    return null;
+  };
+
+  const createOccOrdersForDates=(tpl,dates)=>{
     const existing=new Set(occOrders.filter(o=>o.templateId===tpl.id).map(o=>o.date));
     const toCreate=dates.filter(d=>!existing.has(d));
     if(!toCreate.length){setCustomMsg(t("All dates already have orders for","")+" "+tpl.name+".");return;}
@@ -5393,7 +5431,46 @@ function OccOrdersPage({ctx}){
     setOccOrders(p=>[...p,...newOrders]);
     setCustomMsg(toCreate.length+" "+t("order(s) created for","ஆர்டர்கள் உருவாக்கப்பட்டன")+" "+tpl.name+
       (dates.length-toCreate.length>0?" ("+(dates.length-toCreate.length)+" "+t("already existed, skipped","ஏற்கனவே உள்ளன")+")":""));
+  };
+
+  const bulkCreateCustom=()=>{
+    const tpl=occTemplates.find(x=>x.id===+customTplId);
+    if(!tpl){setCustomMsg(t("Select a template first.","முதலில் மாதிரி தேர்வு செய்யவும்."));return;}
+    const dates=[...new Set(customDatesText.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean))];
+    if(!dates.length){setCustomMsg(t("Paste at least one date (YYYY-MM-DD, one per line or comma-separated).","குறைந்தது ஒரு தேதியையாவது சேர்க்கவும்."));return;}
+    const bad=dates.filter(d=>!/^\d{4}-\d{2}-\d{2}$/.test(d));
+    if(bad.length){setCustomMsg(t("Invalid date format (use YYYY-MM-DD):","தவறான தேதி வடிவம்:")+" "+bad.slice(0,5).join(", "));return;}
+    createOccOrdersForDates(tpl,dates);
     setCustomDatesText("");
+  };
+
+  const downloadCustomDatesTemplate=()=>{
+    const sample=[{Date:"2026-09-05"},{Date:"2026-10-03"},{Date:"2026-11-01"}];
+    const ws=XLSX.utils.json_to_sheet(sample);
+    ws["!cols"]=[{wch:14}];
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Dates");
+    XLSX.writeFile(wb,"occasion_dates_template.xlsx");
+  };
+
+  const importCustomDatesExcel=e=>{
+    const file=e.target.files[0]; if(!file)return;
+    const tpl=occTemplates.find(x=>x.id===+customTplId);
+    if(!tpl){setCustomMsg(t("Select a template first.","முதலில் மாதிரி தேர்வு செய்யவும்."));e.target.value="";return;}
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const wb=XLSX.read(ev.target.result,{type:"binary",cellDates:true});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{defval:"",raw:false,dateNF:"yyyy-mm-dd"});
+      // Accepts a "Date" column, or falls back to the first column in the sheet if unnamed.
+      const firstKey=rows.length?Object.keys(rows[0])[0]:null;
+      const raw=rows.map(r=>r.Date!==undefined&&r.Date!==""?r.Date:(firstKey?r[firstKey]:null));
+      const dates=[...new Set(raw.map(normalizeDateCell).filter(Boolean))];
+      if(!dates.length){setCustomMsg(t("No valid dates found in the file.","கோப்பில் சரியான தேதிகள் இல்லை."));e.target.value="";return;}
+      createOccOrdersForDates(tpl,dates);
+      e.target.value="";
+    };
+    reader.readAsBinaryString(file);
   };
 
   const addItem=(ordId)=>{
@@ -5429,9 +5506,9 @@ function OccOrdersPage({ctx}){
           📆 {t("Custom Bulk Create — Any Template, Any Dates","தனிப்பயன் குவிப்பு — எந்த மாதிரி, எந்த தேதி")}
         </div>
         <div style={{fontSize:11,color:P.muted,marginBottom:10}}>
-          {t("For occasions without a fixed panchang list — e.g. Gurupooja. Pick a template, paste the dates (YYYY-MM-DD, one per line or comma-separated), and create them all at once.","இது நிலையான தேதிகள் இல்லாத சிறப்பு நாட்களுக்கு — எ.கா. குருபூஜை.")}
+          {t("For occasions without a fixed panchang list — e.g. Gurupooja. Pick a template, then either paste dates below or upload an Excel file of dates, and create them all at once.","இது நிலையான தேதிகள் இல்லாத சிறப்பு நாட்களுக்கு — எ.கா. குருபூஜை.")}
         </div>
-        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-start"}}>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end",marginBottom:10}}>
           <div>
             <label style={css.lbl}>{t("Template","மாதிரி")}</label>
             <select style={{...css.sel,minWidth:180}} value={customTplId} onChange={e=>setCustomTplId(e.target.value)}>
@@ -5439,8 +5516,13 @@ function OccOrdersPage({ctx}){
               {occTemplates.map(tp=><option key={tp.id} value={tp.id}>{lang==="en"?tp.name:(tp.nameTamil||tp.name)}</option>)}
             </select>
           </div>
+          <button style={css.btn("ghost")} onClick={downloadCustomDatesTemplate}>📋 {t("Download Dates Template","தேதி டெம்ப்ளேட் பதிவிறக்கு")}</button>
+          <button style={css.btn("success")} onClick={()=>customFileRef.current.click()} disabled={!customTplId}>📤 {t("Import Dates (Excel)","தேதிகள் இறக்கு")}</button>
+          <input ref={customFileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importCustomDatesExcel}/>
+        </div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-start"}}>
           <div style={{flex:1,minWidth:220}}>
-            <label style={css.lbl}>{t("Dates","தேதிகள்")}</label>
+            <label style={css.lbl}>{t("Or paste dates directly","அல்லது தேதிகளை நேரடியாக ஒட்டவும்")}</label>
             <textarea style={{...css.inp,minHeight:70,fontFamily:"monospace",fontSize:12}} value={customDatesText}
               onChange={e=>setCustomDatesText(e.target.value)}
               placeholder={"2026-09-05\n2026-10-03\n2026-11-01"}/>
