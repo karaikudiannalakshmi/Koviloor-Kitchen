@@ -2573,15 +2573,18 @@ function OrderForm({ctx,ord,onClose}){
 // REPORT: DISH-WISE INGREDIENTS
 // ════════════════════════════════════════════════════════════════════
 function RepDish({ctx}){
-  const {orders,recipes,ingredients,lang:gLang,setModal}=ctx;
+  const {orders,recipes,ingredients,locations,lang:gLang,setModal}=ctx;
   const [rLang,setRLang]=useState(gLang);
   // Fix: fallback to English name if Tamil is blank
   const t=(en,ta)=>rLang==="en"?en:ta;
   const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
   const [dt,setDt]=useState(TODAY);
   const [activeSess,setActiveSess]=useState("All");
+  const [locFilter,setLocFilter]=useState([]); // empty = all locations
+  const toggleLocFilter=id=>setLocFilter(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
 
-  const entries=orders.filter(o=>!o.isTemplate&&o.date===dt).flatMap(o=>o.entries.map(e=>({...e,_order:o})));
+  const entries=orders.filter(o=>!o.isTemplate&&o.date===dt)
+    .flatMap(o=>o.entries.filter(e=>!locFilter.length||locFilter.includes(e.locId)).map(e=>({...e,_order:o})));
 
   // Sort: grocery/spice=0, other=1, vegetable=2, sub=9
   const CAT_SORT={grocery:0,spice:0,other:1,cut:1,vegetable:2,sub:9};
@@ -2717,6 +2720,21 @@ function RepDish({ctx}){
         <div><label style={css.lbl}>{t('Date','தேதி')}</label><input type="date" style={{...css.inp,width:160}} value={dt} onChange={e=>setDt(e.target.value)}/></div>
         {entries.length>0&&<button style={css.btn('info',true)} onClick={()=>setModal({type:'postIssues',date:dt})}>📦 {t('Post Issues','சரக்கு போடு')}</button>}
       </ReportBar>
+      {/* Location filter */}
+      {locations.length>0&&(
+        <div style={{display:'flex',gap:6,marginBottom:10,flexWrap:'wrap',alignItems:'center'}}>
+          <span style={{fontSize:11,color:P.muted,marginRight:2}}>{t('Locations:','இடங்கள்:')}</span>
+          <button style={css.btn(locFilter.length===0?'primary':'ghost',true)} onClick={()=>setLocFilter([])}>{t('All','அனைத்தும்')}</button>
+          {locations.map(l=>(
+            <label key={l.id} style={{display:'flex',alignItems:'center',gap:4,fontSize:12,cursor:'pointer',
+              background:locFilter.includes(l.id)?P.saffron+'22':'transparent',
+              border:'1px solid '+(locFilter.includes(l.id)?P.saffron:'#DCC88A'),borderRadius:7,padding:'4px 9px'}}>
+              <input type="checkbox" checked={locFilter.includes(l.id)} onChange={()=>toggleLocFilter(l.id)}/>
+              {rLang==='en'?l.name:l.nameTamil}
+            </label>
+          ))}
+        </div>
+      )}
       {/* Session filter tabs */}
       <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}}>
         {['All',...SESSIONS].map(s=>{
@@ -2898,12 +2916,14 @@ function RepIng({ctx}){
 // REPORT: SHOPPING LIST
 // ════════════════════════════════════════════════════════════════════
 function RepShop({ctx}){
-  const {orders,recipes,ingredients,inventory,lang:gLang}=ctx;
+  const {orders,recipes,ingredients,inventory,locations,lang:gLang}=ctx;
   const [rLang,setRLang]=useState(gLang);
   const t=(en,ta)=>rLang==="en"?en:ta;
   const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
   const [fromDate,setFromDate]=useState(TODAY);
   const [toDate,setToDate]=useState(TODAY);
+  const [locFilter,setLocFilter]=useState([]); // empty = all locations
+  const toggleLocFilter=id=>setLocFilter(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
   // Ingredients to exclude from purchase order (AC pre-cut veg, Milk, derived/intermediate items, etc.)
   const EXCLUDE_PREFIXES=["AC ","AC-"];
   const EXCLUDE_NAMES=["milk","milk- milk","water for dal","water","tamarind juice","tomato juice","mavu-arisi mavu weight","mavu-ulunthu mavu wt"];
@@ -2952,7 +2972,9 @@ function RepShop({ctx}){
     sortedDates.forEach(dt=>{
       byDate[dt]={};
       const ents=orders.filter(o=>!o.isTemplate&&o.date===dt)
-        .flatMap(o=>o.entries.filter(e=>sessFilter==="All"||e.session===sessFilter).map(e=>({...e,_order:o})));
+        .flatMap(o=>o.entries
+          .filter(e=>(sessFilter==="All"||e.session===sessFilter)&&(!locFilter.length||locFilter.includes(e.locId)))
+          .map(e=>({...e,_order:o})));
       computeTotals(ents,recipes,ingredients).forEach(r=>{
         const id=r.d.id;
         const baseUnit=r.d.unit||r.unit;
@@ -3076,7 +3098,7 @@ function RepShop({ctx}){
 
   // Active session tab
   const [activeTab,setActiveTab]=useState("All");
-  const {byDate,combined,allIngs}=useMemo(()=>buildData(activeTab),[activeTab,sortedDates,orders,recipes,ingredients]);
+  const {byDate,combined,allIngs}=useMemo(()=>buildData(activeTab),[activeTab,sortedDates,orders,recipes,ingredients,locFilter]);
   const hasData=allIngs.length>0;
 
   return(
@@ -3098,6 +3120,22 @@ function RepShop({ctx}){
           </div>
         </div>
       </ReportBar>
+
+      {/* Location filter */}
+      {locations.length>0&&(
+        <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
+          <span style={{fontSize:11,color:P.muted,marginRight:2}}>{t("Locations:","இடங்கள்:")}</span>
+          <button style={css.btn(locFilter.length===0?"primary":"ghost",true)} onClick={()=>setLocFilter([])}>{t("All","அனைத்தும்")}</button>
+          {locations.map(l=>(
+            <label key={l.id} style={{display:"flex",alignItems:"center",gap:4,fontSize:12,cursor:"pointer",
+              background:locFilter.includes(l.id)?P.saffron+"22":"transparent",
+              border:"1px solid "+(locFilter.includes(l.id)?P.saffron:"#DCC88A"),borderRadius:7,padding:"4px 9px"}}>
+              <input type="checkbox" checked={locFilter.includes(l.id)} onChange={()=>toggleLocFilter(l.id)}/>
+              {rLang==="en"?l.name:l.nameTamil}
+            </label>
+          ))}
+        </div>
+      )}
 
       {/* Session tabs */}
       <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
