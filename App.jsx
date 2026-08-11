@@ -4454,7 +4454,11 @@ function RepPerPerson({ctx}){
         const rec=recipes.find(r=>r.id===e.recId);
         const loc=locations.find(l=>l.id===e.locId);
         if(!rec||!loc)return;
-        const pax=e.basePax||+o.pax||null;
+        // e.qty is already scaled to the order's CURRENT pax (see changePax in OrderForm),
+        // so that must be the divisor here — e.basePax is only the original reference pax
+        // from when the entry was first added/locked, and dividing the scaled qty by that
+        // stale number silently produces a wrong per-person figure.
+        const pax=(+o.pax>0?+o.pax:null)||e.basePax||null;
         const perPerson=pax?e.qty/pax:null;
         const rule=matchLocDefault(loc,rec);
         const expected=rule?rule.qty:null;
@@ -4473,10 +4477,19 @@ function RepPerPerson({ctx}){
   // A cell is flagged either against its location's own Standard Quantity (if defined)
   // or, failing that, against the row's own median across sibling locations — so an
   // outlier location jumps out even when no Standard Quantity rule exists yet.
-  const {colLocations,gridRows}=useMemo(()=>{
+  const {colLocations,gridRows,paxByLoc}=useMemo(()=>{
     const withPerPerson=rows.filter(r=>r.perPerson!==null);
     const usedLocIds=[...new Set(withPerPerson.map(r=>r.loc.id))];
     const cols=locations.filter(l=>usedLocIds.includes(l.id));
+
+    // Distinct pax values actually used per location, for a visible sanity-check in the header.
+    const paxSets={};
+    withPerPerson.forEach(r=>{
+      if(!paxSets[r.loc.id])paxSets[r.loc.id]=new Set();
+      if(r.pax)paxSets[r.loc.id].add(r.pax);
+    });
+    const paxByLocResult={};
+    Object.entries(paxSets).forEach(([locId,set])=>{paxByLocResult[locId]=[...set].sort((a,b)=>a-b);});
 
     const byKey={}; // "recId_session" -> {rec,session,cells:{locId:[perPerson,...]}}
     withPerPerson.forEach(r=>{
@@ -4497,7 +4510,7 @@ function RepPerPerson({ctx}){
       return{...row,avgByLoc,median};
     }).sort((a,b)=>n(a.rec).localeCompare(n(b.rec)));
 
-    return{colLocations:cols,gridRows:grid};
+    return{colLocations:cols,gridRows:grid,paxByLoc:paxByLocResult};
   },[rows,locations]);
 
   const cellDeviation=(row,locId)=>{
@@ -4617,7 +4630,17 @@ function RepPerPerson({ctx}){
                 <thead><tr>
                   <th style={css.th}>{t("Recipe","சமையல்")}</th>
                   <th style={css.th}>{t("Session","அமர்வு")}</th>
-                  {colLocations.map(l=><th key={l.id} style={{...css.th,textAlign:"right",minWidth:90}}>{n(l)}</th>)}
+                  {colLocations.map(l=>{
+                    const paxList=paxByLoc[l.id]||[];
+                    const varies=paxList.length>1;
+                    const paxLabel=paxList.length===0?"":paxList.length===1?paxList[0]+" "+t("pax","பாக்ஸ்"):paxList.join(", ")+" "+t("pax","பாக்ஸ்");
+                    return(
+                      <th key={l.id} style={{...css.th,textAlign:"right",minWidth:90}}>
+                        {n(l)}
+                        {paxLabel&&<div style={{fontWeight:400,fontSize:10,opacity:0.9,marginTop:2,color:varies?"#FBBF24":undefined}} title={varies?t("Pax varied across orders in this range","இந்த வரம்பில் பாக்ஸ் மாறுபட்டது"):undefined}>👥 {paxLabel}</div>}
+                      </th>
+                    );
+                  })}
                 </tr></thead>
                 <tbody>
                   {gridRows.map((row,i)=>(
