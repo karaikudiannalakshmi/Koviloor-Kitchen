@@ -206,6 +206,112 @@ function applyScaling(baseQty,multiplier,factor,benchmark){
   return benchmark+(linear-benchmark)*factor;
 }
 
+// ── Searchable ingredient picker: type to filter (English/Tamil), click to select ──
+// Confidence-scored ranking for live search: exact match, then canonical variant
+// (e.g. query "Tomato" ranks "Tomato (Cut)" highly), then prefix, then loose substring.
+// Adapted from the same idea as the ledger app's resolveIngredient(), but tuned for
+// incremental typing rather than one-shot bulk-import resolution.
+function scoreIngredientMatch(query,ing){
+  const qn=query.trim().toLowerCase();
+  if(!qn)return 1;
+  const nn=(ing.name||"").trim().toLowerCase();
+  const tn=(ing.nameTamil||"").trim().toLowerCase();
+  if(nn===qn||tn===qn)return 100;
+  const restEn=nn.startsWith(qn)?nn.slice(qn.length).trim():null;
+  const restTa=tn.startsWith(qn)?tn.slice(qn.length).trim():null;
+  if((restEn!==null&&(restEn===""||restEn.startsWith("(")))||
+     (restTa!==null&&(restTa===""||restTa.startsWith("("))))return 92; // canonical variant, e.g. "Tomato (Cut)"
+  if(nn.startsWith(qn)||tn.startsWith(qn))return 80;
+  if(nn.includes(qn)||tn.includes(qn))return 55;
+  return 0;
+}
+
+const ING_CAT_ORDER=["grocery","vegetable","spice","cut","other"];
+const ING_CAT_ICON={grocery:"🛒",vegetable:"🥬",spice:"🌶️",cut:"✂️",other:"📦"};
+const ING_CAT_COLOR={grocery:"#8B5E34",vegetable:"#3E7A3E",spice:"#C0392B",cut:"#B8860B",other:"#6B6B6B"};
+
+function IngredientPicker({ingredients,value,onChange,lang,placeholder,style}){
+  const t=(en,ta)=>lang==="en"?en:ta;
+  const n=(x)=>lang==="en"?x.name:(x.nameTamil||x.name);
+  const [open,setOpen]=useState(false);
+  const [q,setQ]=useState("");
+  const [hi,setHi]=useState(0);
+  const boxRef=useRef();
+  const inputRef=useRef();
+  const selected=value?ingredients.find(x=>x.id===+value):null;
+
+  useEffect(()=>{
+    const handler=e=>{if(boxRef.current&&!boxRef.current.contains(e.target))setOpen(false);};
+    document.addEventListener("mousedown",handler);
+    return ()=>document.removeEventListener("mousedown",handler);
+  },[]);
+  useEffect(()=>{if(open&&inputRef.current)inputRef.current.focus();},[open]);
+  useEffect(()=>{setHi(0);},[q]);
+
+  const catRank=cat=>{const idx=ING_CAT_ORDER.indexOf(cat);return idx<0?99:idx;};
+
+  const results=useMemo(()=>{
+    const qq=q.trim();
+    if(!qq){
+      // No query: group by category, alphabetical within each.
+      return [...ingredients].sort((a,b)=>catRank(a.category)-catRank(b.category)||a.name.localeCompare(b.name)).slice(0,60);
+    }
+    return ingredients
+      .map(i=>({i,score:scoreIngredientMatch(qq,i)}))
+      .filter(x=>x.score>0)
+      .sort((a,b)=>b.score-a.score||a.i.name.localeCompare(b.i.name))
+      .slice(0,60)
+      .map(x=>x.i);
+  },[q,ingredients]);
+
+  const choose=i=>{onChange(i?i.id:"");setOpen(false);setQ("");};
+
+  const onKey=e=>{
+    if(e.key==="ArrowDown"){e.preventDefault();setHi(h=>Math.min(h+1,results.length-1));}
+    else if(e.key==="ArrowUp"){e.preventDefault();setHi(h=>Math.max(h-1,0));}
+    else if(e.key==="Enter"){e.preventDefault();if(results[hi])choose(results[hi]);}
+    else if(e.key==="Escape"){setOpen(false);}
+  };
+
+  return(
+    <div ref={boxRef} style={{position:"relative",...style}}>
+      <button type="button" style={{...css.inp,width:"100%",textAlign:"left",display:"flex",
+        alignItems:"center",justifyContent:"space-between",cursor:"pointer",background:"white"}}
+        onClick={()=>setOpen(o=>!o)}>
+        <span style={{color:selected?P.deepBrown:P.muted}}>
+          {selected?n(selected)+" ("+selected.unit+")":(placeholder||t("Search ingredient...","பொருள் தேடு..."))}
+        </span>
+        <span style={{color:P.muted,fontSize:11}}>▾</span>
+      </button>
+      {open&&(
+        <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:50,background:"white",
+          border:"1px solid #DCC88A",borderRadius:7,marginTop:2,boxShadow:"0 4px 12px rgba(0,0,0,0.15)"}}>
+          <input ref={inputRef} style={{...css.inp,width:"100%",borderRadius:"7px 7px 0 0",borderBottom:"1px solid #EEE"}}
+            value={q} onChange={e=>setQ(e.target.value)} onKeyDown={onKey}
+            placeholder={t("Type to search...","தேட தட்டச்சு செய்யவும்...")}/>
+          <div style={{maxHeight:220,overflowY:"auto"}}>
+            {results.length===0?(
+              <div style={{padding:"8px 12px",fontSize:12,color:P.muted}}>{t("No matches","பொருந்தவில்லை")}</div>
+            ):results.map((i,idx)=>(
+              <div key={i.id}
+                style={{padding:"7px 12px",fontSize:13,cursor:"pointer",borderBottom:"1px solid #F5F0E0",
+                  display:"flex",alignItems:"center",gap:8,
+                  background:idx===hi?"#FEF3C7":(i.id===+value?"#FFF8EC":"white")}}
+                onMouseEnter={()=>setHi(idx)}
+                onMouseDown={e=>{e.preventDefault();choose(i);}}
+              >
+                <span style={{width:8,height:8,borderRadius:"50%",background:ING_CAT_COLOR[i.category]||P.muted,flexShrink:0}}/>
+                <span style={{flex:1}}>{n(i)}</span>
+                <span style={{fontSize:11,color:P.muted}}>{ING_CAT_ICON[i.category]||""} {i.unit}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Simple Levenshtein distance, used for duplicate-ingredient-name detection ──
 function levenshtein(a,b){
   a=(a||"").toLowerCase(); b=(b||"").toLowerCase();
@@ -968,17 +1074,13 @@ function IngSubstituteModal({ctx,onClose}){
       <div style={css.g2}>
         <div>
           <label style={css.lbl}>{t("Replace this ingredient","இந்த பொருளை மாற்று")}</label>
-          <select style={{...css.sel,width:"100%"}} value={srcId} onChange={e=>{setSrcId(e.target.value);setPreview(null);}}>
-            <option value="">{t("Select...","தேர்வு...")}</option>
-            {ingredients.map(i=><option key={i.id} value={i.id}>{n(i)} ({i.unit})</option>)}
-          </select>
+          <IngredientPicker ingredients={ingredients} value={srcId} lang={lang}
+            onChange={id=>{setSrcId(id);setPreview(null);}}/>
         </div>
         <div>
           <label style={css.lbl}>{t("With this ingredient","இதனுடன்")}</label>
-          <select style={{...css.sel,width:"100%"}} value={tgtId} onChange={e=>{setTgtId(e.target.value);setPreview(null);}}>
-            <option value="">{t("Select...","தேர்வு...")}</option>
-            {ingredients.filter(i=>i.id!==+srcId).map(i=><option key={i.id} value={i.id}>{n(i)} ({i.unit})</option>)}
-          </select>
+          <IngredientPicker ingredients={ingredients.filter(i=>i.id!==+srcId)} value={tgtId} lang={lang}
+            onChange={id=>{setTgtId(id);setPreview(null);}}/>
         </div>
       </div>
       <div style={{marginTop:10}}>
@@ -1712,10 +1814,8 @@ function RecForm({ctx,rec,onClose}){
       {/* ── Direct Ingredients ───────────────────────── */}
       <div style={{...css.sHead,marginTop:14}}>{t("Direct Ingredients","நேரடி பொருட்கள்")}</div>
       <div style={{display:"flex",gap:6,marginBottom:10}}>
-        <select style={{...css.sel,flex:2}} value={ni.iid} onChange={e=>setNi({...ni,iid:e.target.value})}>
-          <option value="">{t("Select ingredient...","தேர்வு...")}</option>
-          {ingredients.map(i=><option key={i.id} value={i.id}>{lang==="en"?i.name:i.nameTamil} ({i.unit})</option>)}
-        </select>
+        <IngredientPicker ingredients={ingredients} value={ni.iid} lang={lang}
+          onChange={id=>setNi({...ni,iid:id})} style={{flex:2}}/>
         <input type="number" placeholder={t("Qty","அளவு")} style={{...css.inp,width:70}} value={ni.qty} onChange={e=>setNi({...ni,qty:e.target.value})}/>
         <select style={css.sel} value={ni.unit} onChange={e=>setNi({...ni,unit:e.target.value})}>{["kg","g","L","ml","nos","tsp","tbsp"].map(u=><option key={u}>{u}</option>)}</select>
         <button style={css.btn()} onClick={addIng}>+</button>
@@ -6215,13 +6315,11 @@ function PurchForm({ctx,onClose}){
       <div style={css.g2}>
         <div>
           <label style={css.lbl}>{t("Ingredient","பொருள்")}</label>
-          <select style={{...css.sel,width:"100%"}} value={f.iid} onChange={e=>{
-            const ing=ingredients.find(x=>x.id===+e.target.value);
-            setF({...f,iid:e.target.value,unit:ing?.unit||"kg"});
-          }}>
-            <option value="">{t("Select...","தேர்வு...")}</option>
-            {ingredients.map(i=><option key={i.id} value={i.id}>{n(i)} ({i.unit})</option>)}
-          </select>
+          <IngredientPicker ingredients={ingredients} value={f.iid} lang={lang}
+            onChange={id=>{
+              const ing=ingredients.find(x=>x.id===id);
+              setF({...f,iid:id,unit:ing?.unit||"kg"});
+            }}/>
           {/* Normative cost hint */}
           {norm&&<div style={{marginTop:5,fontSize:11,color:P.purple,fontWeight:600}}>
             📐 {t("Normative cost","நிலையான விலை")}: ₹{norm}/{selIng.unit}
@@ -6325,10 +6423,8 @@ function AdjustForm({ctx,onClose}){
       <div style={css.g2}>
         <div>
           <label style={css.lbl}>{t("Ingredient","பொருள்")}</label>
-          <select style={{...css.sel,width:"100%"}} value={f.iid} onChange={e=>setF({...f,iid:e.target.value})}>
-            <option value="">{t("Select...","தேர்வு...")}</option>
-            {ingredients.map(i=><option key={i.id} value={i.id}>{n(i)} ({i.unit})</option>)}
-          </select>
+          <IngredientPicker ingredients={ingredients} value={f.iid} lang={lang}
+            onChange={id=>setF({...f,iid:id})}/>
           {selIng&&<div style={{marginTop:5,fontSize:11,color:P.muted}}>
             {t("Current balance","தற்போதைய இருப்பு")}: <strong style={{color:curBal>0?P.success:P.danger}}>{curBal.toFixed(2)} {selIng.unit}</strong>
           </div>}
