@@ -5799,8 +5799,42 @@ function OccPurchasePage({ctx}){
   );
 }
 
+// ── One row in the ledger-import unmatched-items review: map to existing, create new, or dismiss ──
+function UnmatchedRowResolver({row,ingredients,lang,onMapToExisting,onCreateNew,onDismiss}){
+  const t=(en,ta)=>lang==="en"?en:ta;
+  const [pickId,setPickId]=useState("");
+  const [showCreate,setShowCreate]=useState(false);
+  const [newCat,setNewCat]=useState("other");
+
+  return(
+    <div style={{background:"white",border:"1px solid #F5D76E",borderRadius:7,padding:10}}>
+      <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:showCreate?8:0}}>
+        <div style={{minWidth:160}}>
+          <strong style={{fontSize:13}}>{row.name}</strong>
+          <div style={{fontSize:10,color:P.muted}}>{row.date} · {row.qty} {row.unit||""} · ₹{row.cpu}{row.vendor?" · "+row.vendor:""}</div>
+        </div>
+        <IngredientPicker ingredients={ingredients} value={pickId} lang={lang}
+          placeholder={t("Map to existing ingredient...","ஏற்கனவே உள்ள பொருளுடன் இணை...")}
+          onChange={setPickId} style={{minWidth:220}}/>
+        <button style={css.btn("success",true)} disabled={!pickId} onClick={()=>onMapToExisting(+pickId)}>✓ {t("Map & Import","இணை மற்றும் இறக்கு")}</button>
+        <button style={css.btn(showCreate?"primary":"ghost",true)} onClick={()=>setShowCreate(v=>!v)}>+ {t("New Ingredient","புதிய பொருள்")}</button>
+        <button style={css.btn("ghost",true)} onClick={onDismiss}>✕ {t("Dismiss","தவிர்")}</button>
+      </div>
+      {showCreate&&(
+        <div style={{display:"flex",gap:8,alignItems:"center",paddingTop:8,borderTop:"1px solid #F5F0E0"}}>
+          <span style={{fontSize:11,color:P.muted}}>{t("Category","வகை")}:</span>
+          <select style={{...css.sel,fontSize:12}} value={newCat} onChange={e=>setNewCat(e.target.value)}>
+            {["grocery","vegetable","spice","cut","other"].map(c=><option key={c} value={c}>{c}</option>)}
+          </select>
+          <button style={css.btn("success",true)} onClick={()=>onCreateNew(newCat)}>✓ {t("Create & Import as","உருவாக்கி இறக்கு")} "{row.name}"</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function InvPage({ctx}){
-  const {ingredients,inventory,setInventory,lang,setModal}=ctx;
+  const {ingredients,setIngredients,inventory,setInventory,lang,setModal}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
   const n=(x)=>lang==="en"?x.name:x.nameTamil;
   const [tab,setTab]=useState("balance");
@@ -5815,6 +5849,7 @@ function InvPage({ctx}){
 
   const ledgerFileRef=useRef();
   const [ledgerMsg,setLedgerMsg]=useState("");
+  const [unmatchedRows,setUnmatchedRows]=useState([]); // rows that failed ingredient matching, awaiting review
 
   // Reads a cell by trying several possible header names, in order.
   const getCellVal=(r,keys)=>{
@@ -5834,7 +5869,7 @@ function InvPage({ctx}){
       const rows=XLSX.utils.sheet_to_json(ws,{defval:"",raw:false,dateNF:"yyyy-mm-dd"});
       if(!rows.length){setLedgerMsg(t("The file has no rows.","கோப்பில் தரவு இல்லை."));e.target.value="";return;}
 
-      let imported=0,skippedZero=0; const unmatched=[]; const dupSkipped=[];
+      let imported=0,skippedZero=0; const newUnmatched=[]; const dupSkipped=[];
       setInventory(prev=>{
         let purchases=[...prev.purchases];
         // Build a signature set of existing ledger-imported purchases to avoid double-import
@@ -5844,7 +5879,7 @@ function InvPage({ctx}){
             .map(p=>p.iid+"|"+p.date+"|"+p.qty+"|"+p.cpu+"|"+(p.billNo||""))
         );
 
-        rows.forEach(r=>{
+        rows.forEach((r,ri)=>{
           const name=(getCellVal(r,["item","ingredient","name","பொருள்"])+"").trim();
           if(!name)return;
           const dateRaw=getCellVal(r,["date","bill date","billdate","தேதி"]);
@@ -5860,7 +5895,7 @@ function InvPage({ctx}){
 
           const nameLC=name.toLowerCase();
           const ing=ingredients.find(x=>x.name.toLowerCase()===nameLC||(x.nameTamil||"").toLowerCase()===nameLC);
-          if(!ing){unmatched.push(name);return;}
+          if(!ing){newUnmatched.push({key:ri+"_"+Date.now(),name,date,qty,cpu,unit,vendor,billNo});return;}
 
           const sig=ing.id+"|"+date+"|"+qty+"|"+cpu+"|"+billNo;
           if(existingSig.has(sig)){dupSkipped.push(name+" ("+date+")");return;}
@@ -5875,15 +5910,44 @@ function InvPage({ctx}){
         return{...prev,purchases};
       });
 
+      setUnmatchedRows(newUnmatched);
       const parts=[imported+" "+t("purchase(s) imported","கொள்முதல்கள் இறக்கப்பட்டன")];
       if(dupSkipped.length)parts.push(dupSkipped.length+" "+t("already imported, skipped","ஏற்கனவே இறக்கப்பட்டது"));
       if(skippedZero)parts.push(skippedZero+" "+t("row(s) with no quantity, skipped","அளவு இல்லாத வரிசைகள்"));
-      if(unmatched.length)parts.push(unmatched.length+" "+t("not matched","பொருந்தவில்லை")+": "+[...new Set(unmatched)].slice(0,6).join(", "));
+      if(newUnmatched.length)parts.push(newUnmatched.length+" "+t("not matched — review below","பொருந்தவில்லை — கீழே பார்க்கவும்"));
       setLedgerMsg(parts.join(" · "));
       e.target.value="";
     };
     reader.readAsBinaryString(file);
   };
+
+  // Resolve an unmatched row by mapping it to an existing ingredient — remembers the
+  // Tamil/alternate name on that ingredient so future imports match automatically.
+  const resolveUnmatchedToExisting=(row,ingId)=>{
+    const ing=ingredients.find(x=>x.id===ingId);
+    if(!ing)return;
+    if(!ing.nameTamil||!ing.nameTamil.trim()){
+      setIngredients(p=>p.map(x=>x.id===ingId?{...x,nameTamil:row.name}:x));
+    }
+    setInventory(prev=>({...prev,purchases:[...prev.purchases,{
+      id:Date.now()+ingId+Math.random(),iid:ingId,date:row.date,qty:row.qty,unit:row.unit||ing.unit,cpu:row.cpu,
+      supplier:row.vendor||"",note:row.billNo?"Bill #"+row.billNo:"",billNo:row.billNo,source:"ledger_import",
+    }]}));
+    setUnmatchedRows(p=>p.filter(x=>x.key!==row.key));
+  };
+
+  // Resolve by creating a brand-new ingredient using the unmatched name.
+  const resolveUnmatchedByCreating=(row,category)=>{
+    const newIng={id:Date.now()+Math.random(),name:row.name,nameTamil:row.name,category:category||"other",unit:row.unit||"kg",normCost:row.cpu||undefined};
+    setIngredients(p=>[...p,newIng]);
+    setInventory(prev=>({...prev,purchases:[...prev.purchases,{
+      id:Date.now()+Math.random(),iid:newIng.id,date:row.date,qty:row.qty,unit:row.unit||newIng.unit,cpu:row.cpu,
+      supplier:row.vendor||"",note:row.billNo?"Bill #"+row.billNo:"",billNo:row.billNo,source:"ledger_import",
+    }]}));
+    setUnmatchedRows(p=>p.filter(x=>x.key!==row.key));
+  };
+
+  const dismissUnmatched=row=>setUnmatchedRows(p=>p.filter(x=>x.key!==row.key));
 
   const downloadOpeningStockTemplate=()=>{
     const data=ingredients.map(ing=>({
@@ -6119,6 +6183,25 @@ function InvPage({ctx}){
           <button style={css.btn("success",true)} onClick={()=>ledgerFileRef.current.click()}>📤 {t("Import from Excel","Excel இறக்கு")}</button>
           <input ref={ledgerFileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importLedgerPurchases}/>
           {ledgerMsg&&<div style={{fontSize:12,color:"#166534",fontWeight:600,marginTop:10}}>✓ {ledgerMsg}</div>}
+        </div>
+      )}
+
+      {tab==="purchases"&&unmatchedRows.length>0&&(
+        <div style={{...css.card,background:"#FEF3C7",border:"1px solid #F59E0B",marginBottom:14}}>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:"#92400E",marginBottom:4}}>
+            ⚠️ {t("Review Unmatched Items","பொருந்தாத பொருட்களை சரிபார்க்கவும்")} ({unmatchedRows.length})
+          </div>
+          <div style={{fontSize:11,color:"#92400E",marginBottom:12}}>
+            {t("These names from your ledger export didn't match any ingredient. Map each one to an existing ingredient (remembers the name for next time) or create a new one — or dismiss to skip it.","இந்த பெயர்கள் பொருந்தவில்லை. ஏற்கனவே உள்ள பொருளுடன் இணைக்கவும் அல்லது புதிதாக உருவாக்கவும்.")}
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {unmatchedRows.map(row=>(
+              <UnmatchedRowResolver key={row.key} row={row} ingredients={ingredients} lang={lang}
+                onMapToExisting={ingId=>resolveUnmatchedToExisting(row,ingId)}
+                onCreateNew={category=>resolveUnmatchedByCreating(row,category)}
+                onDismiss={()=>dismissUnmatched(row)}/>
+            ))}
+          </div>
         </div>
       )}
 
