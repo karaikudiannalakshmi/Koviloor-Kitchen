@@ -315,15 +315,24 @@ function IngredientPicker({ingredients,value,onChange,lang,placeholder,style}){
 // ── Simple Levenshtein distance, used for duplicate-ingredient-name detection ──
 // Normalizes a date cell/string from Excel (JS Date object, serial number already
 // converted by cellDates:true, or a typed string in various formats) to YYYY-MM-DD.
+// Guards against stale data: itemDefaults was an object (keyed by recipe id) in an
+// earlier version of this feature before being redesigned as an array of prefix rules.
+// Any location still holding the old shape (or anything else non-array) is treated as
+// having no rules yet, instead of crashing every screen that reads it.
+function safeItemDefaults(loc){
+  return Array.isArray(loc?.itemDefaults)?loc.itemDefaults:[];
+}
+
 // Finds the best (longest) matching name-prefix rule for a recipe at a location,
 // e.g. a location with rules for "K" and "KK" should match "KK-Vendakkai" to "KK", not "K".
 function matchLocDefault(loc,rec){
-  if(!loc||!rec||!loc.itemDefaults||!loc.itemDefaults.length)return null;
+  const defs=safeItemDefaults(loc);
+  if(!rec||!defs.length)return null;
   const nameLC=(rec.name||"").toLowerCase();
   let best=null;
-  loc.itemDefaults.forEach(rule=>{
-    const p=rule.prefix.toLowerCase();
-    if(nameLC.startsWith(p)&&(!best||p.length>best.prefix.length))best=rule;
+  defs.forEach(rule=>{
+    const p=(rule.prefix||"").toLowerCase();
+    if(p&&nameLC.startsWith(p)&&(!best||p.length>best.prefix.length))best=rule;
   });
   return best;
 }
@@ -2510,13 +2519,13 @@ function LocForm({ctx,onClose}){
     const rule={prefix:defPrefix.trim(),qty:+defQty,unit:defUnit.trim()};
     setLocations(p=>p.map(l=>{
       if(l.id!==locId)return l;
-      const existing=(l.itemDefaults||[]).filter(r=>r.prefix.toLowerCase()!==rule.prefix.toLowerCase());
+      const existing=safeItemDefaults(l).filter(r=>r.prefix.toLowerCase()!==rule.prefix.toLowerCase());
       return{...l,itemDefaults:[...existing,rule]};
     }));
     setDefPrefix("");setDefQty("");setDefUnit("");
   };
   const removeItemDefault=(locId,prefix)=>{
-    setLocations(p=>p.map(l=>l.id===locId?{...l,itemDefaults:(l.itemDefaults||[]).filter(r=>r.prefix!==prefix)}:l));
+    setLocations(p=>p.map(l=>l.id===locId?{...l,itemDefaults:safeItemDefaults(l).filter(r=>r.prefix!==prefix)}:l));
   };
 
   const usedLocIds=new Set((orders||[]).flatMap(o=>(o.entries||[]).map(e=>e.locId)));
@@ -2584,7 +2593,7 @@ function LocForm({ctx,onClose}){
       {expandedLocId&&(()=>{
         const loc=locations.find(l=>l.id===expandedLocId);
         if(!loc)return null;
-        const defaults=loc.itemDefaults||[];
+        const defaults=safeItemDefaults(loc);
         const matchCount=defPrefix.trim()?recipes.filter(r=>!r.isSubRecipe&&r.name.toLowerCase().startsWith(defPrefix.trim().toLowerCase())).length:0;
         return(
           <div style={{background:"#FFF8EC",border:"1px solid #F5D76E",borderRadius:8,padding:12,marginBottom:16}}>
@@ -2608,14 +2617,20 @@ function LocForm({ctx,onClose}){
             <div style={{display:"flex",gap:8,alignItems:"flex-end",flexWrap:"wrap"}}>
               <div>
                 <label style={css.lbl}>{t("Name Prefix","பெயர் முன்னொட்டு")}</label>
-                <input style={{...css.inp,width:110}} placeholder="KK, Rice..." value={defPrefix} onChange={e=>setDefPrefix(e.target.value)}/>
+                <input style={{...css.inp,width:110}} placeholder="KK, Rice..." value={defPrefix} onChange={e=>{
+                  const val=e.target.value;
+                  setDefPrefix(val);
+                  // Auto-fill unit from what the matching recipes already use — no need to pick it manually
+                  const matches=recipes.filter(r=>!r.isSubRecipe&&r.name.toLowerCase().startsWith(val.trim().toLowerCase()));
+                  if(val.trim()&&matches.length&&matches[0].yieldUnit)setDefUnit(matches[0].yieldUnit);
+                }}/>
               </div>
               <div>
                 <label style={css.lbl}>{t("Qty / person","அளவு / நபர்")}</label>
                 <input type="number" step="0.001" min="0" style={{...css.inp,width:90}} value={defQty} onChange={e=>setDefQty(e.target.value)}/>
               </div>
               <div>
-                <label style={css.lbl}>{t("Unit","அலகு")}</label>
+                <label style={css.lbl}>{t("Unit","அலகு")}{defUnit&&<span style={{color:P.success,fontWeight:400,marginLeft:4}}>✓ {t("auto","தானாக")}</span>}</label>
                 <select style={{...css.sel,width:80}} value={defUnit} onChange={e=>setDefUnit(e.target.value)}>
                   <option value="">—</option>
                   {["g","kg","ml","l","nos","pcs"].map(u=><option key={u} value={u}>{u}</option>)}
@@ -2703,6 +2718,13 @@ function OrderForm({ctx,ord,onClose}){
   const changeSession=(sess)=>{
     setDefSession(sess);
     updateF(x=>({...x,entries:x.entries.map(e=>({...e,session:sess}))}));
+  };
+
+  // When location changes — update ALL existing entries to new location too, so picking
+  // it once at the top genuinely applies to the whole order, not just entries added after
+  const changeLocation=(locId)=>{
+    setDefLocId(locId);
+    updateF(x=>({...x,entries:x.entries.map(e=>({...e,locId:+locId}))}));
   };
 
   const filteredRecs=recipes
@@ -2793,7 +2815,7 @@ function OrderForm({ctx,ord,onClose}){
       <div style={{display:"flex",gap:12,alignItems:"center",background:P.highlight,padding:"8px 12px",borderRadius:8,marginBottom:12,flexWrap:"wrap"}}>
         <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:180}}>
           <label style={{...css.lbl,margin:0,whiteSpace:"nowrap"}}>{t("Location","இடம்")}</label>
-          <select style={{...css.sel,flex:1}} value={defLocId} onChange={e=>setDefLocId(e.target.value)}>
+          <select style={{...css.sel,flex:1}} value={defLocId} onChange={e=>changeLocation(e.target.value)}>
             <option value="">{t("-- Select --","-- தேர்வு --")}</option>
             {locations.map(l=><option key={l.id} value={l.id}>{lang==="en"?l.name:l.nameTamil}</option>)}
           </select>
