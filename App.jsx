@@ -315,6 +315,19 @@ function IngredientPicker({ingredients,value,onChange,lang,placeholder,style}){
 // ── Simple Levenshtein distance, used for duplicate-ingredient-name detection ──
 // Normalizes a date cell/string from Excel (JS Date object, serial number already
 // converted by cellDates:true, or a typed string in various formats) to YYYY-MM-DD.
+// Finds the best (longest) matching name-prefix rule for a recipe at a location,
+// e.g. a location with rules for "K" and "KK" should match "KK-Vendakkai" to "KK", not "K".
+function matchLocDefault(loc,rec){
+  if(!loc||!rec||!loc.itemDefaults||!loc.itemDefaults.length)return null;
+  const nameLC=(rec.name||"").toLowerCase();
+  let best=null;
+  loc.itemDefaults.forEach(rule=>{
+    const p=rule.prefix.toLowerCase();
+    if(nameLC.startsWith(p)&&(!best||p.length>best.prefix.length))best=rule;
+  });
+  return best;
+}
+
 function normalizeDateCell(val){
   if(val instanceof Date&&!isNaN(val))return val.toISOString().slice(0,10);
   const s=(val+"").trim();
@@ -560,6 +573,7 @@ function App(){
       {id:"rep_col",en:"Location Columnar",ta:"இட நெடுவரிசை"},
       {id:"rep_cost",en:"Cost Analysis",ta:"செலவு பகுப்பாய்வு"},
       {id:"rep_compare",en:"Compare Recipes",ta:"சமையல் ஒப்பீடு"},
+      {id:"rep_perperson",en:"Per-Person Quantity",ta:"ஒரு நபர் அளவு"},
     ]},
     {id:"inventory",icon:"📦",en:"Inventory",ta:"சரக்கு மேலாண்மை"},
     {id:"pooja",icon:"🪔",en:"Pooja Material",ta:"பூஜை பொருள்",children:[
@@ -630,6 +644,7 @@ function App(){
           {page==="rep_col"&&<RepCol ctx={ctx}/>}
           {page==="rep_cost"&&<RepCost ctx={ctx}/>}
           {page==="rep_compare"&&<RepCompare ctx={ctx}/>}
+          {page==="rep_perperson"&&<RepPerPerson ctx={ctx}/>}
           {page==="inventory"&&<InvPage ctx={ctx}/>}
           {page==="pooja_items"&&<PoojaItemsPage ctx={ctx}/>}
           {page==="pooja_temples"&&<PoojaTemplesPage ctx={ctx}/>}
@@ -2104,8 +2119,21 @@ function OrdersPage({ctx}){
     const newOrders=[]; let idc=Date.now();
     dupLocTargets.forEach(targetId=>{
       const targetPax=+dupLocTargetPax[targetId]||null;
+      const targetLoc=locations.find(l=>l.id===targetId);
       sourceOrders.forEach(o=>{
         const entries=(o.entries||[]).filter(e=>e.locId===srcLocId&&(dupLocSess==="All"||e.session===dupLocSess)).map(e=>{
+          // Prefer the TARGET location's own standard per-person rate (from Standard
+          // Quantities, matched by name prefix) if one exists for this recipe — different
+          // locations can genuinely eat different amounts per person. Only falls back to
+          // scaling the source's own ratio when the target has no defined rate.
+          if(targetPax){
+            const rec=recipes.find(r=>r.id===e.recId);
+            const rule=matchLocDefault(targetLoc,rec);
+            if(rule){
+              const newQty=+(rule.qty*targetPax).toFixed(3);
+              return{...e,locId:targetId,qty:newQty,baseQty:newQty,basePax:targetPax};
+            }
+          }
           // If a pax was given for this target and the source entry has a base reference
           // (falling back to the order's own pax field if the entry itself lacks one),
           // scale the quantity proportionally instead of just copying the raw number.
@@ -2118,7 +2146,6 @@ function OrdersPage({ctx}){
           return{...e,locId:targetId};
         });
         if(!entries.length)return;
-        const targetLoc=locations.find(l=>l.id===targetId);
         const locLabel=targetLoc?(lang==="en"?targetLoc.name:(targetLoc.nameTamil||targetLoc.name)):"";
         const newName=locLabel||o.name;
         newOrders.push({id:idc++,name:newName,date:dupLocDate,isTemplate:false,pax:targetPax||"",entries,costSnapshot:costOfEntries(entries)});
@@ -2291,7 +2318,7 @@ function OrdersPage({ctx}){
               <div style={{marginBottom:10}}>
                 <label style={css.lbl}>{t("Copy to these locations","இந்த இடங்களுக்கு நகலெடு")}</label>
                 <div style={{fontSize:11,color:P.muted,marginBottom:6}}>
-                  {t("Optionally set a Pax for each — quantities scale proportionally instead of copying the source location's raw numbers. Leave blank to copy as-is.","விருப்பமாக ஒவ்வொன்றிற்கும் பாக்ஸ் அமைக்கவும் — அளவு விகிதாசாரமாக மாறும்.")}
+                  {t("Set a Pax for each target — if that location has Standard Quantities defined (see 📋 Qty above), quantities come from its own per-person rate; otherwise they scale proportionally from the source. Leave Pax blank to copy the raw numbers as-is. Everything is editable afterward.","ஒவ்வொன்றிற்கும் பாக்ஸ் அமைக்கவும் — நிலையான அளவுகள் இருந்தால் அதன் விகிதம் பயன்படுத்தப்படும், இல்லையெனில் மூலத்திலிருந்து விகிதாசாரமாக மாறும்.")}
                 </div>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   {locations.filter(l=>l.id!==+dupLocSource).map(l=>{
@@ -2475,25 +2502,21 @@ function LocForm({ctx,onClose}){
   const [err,setErr]=useState("");
 
   const [expandedLocId,setExpandedLocId]=useState(null);
-  const [defRecId,setDefRecId]=useState("");
+  const [defPrefix,setDefPrefix]=useState("");
   const [defQty,setDefQty]=useState("");
-  const [defRecSearch,setDefRecSearch]=useState("");
-  const filteredDefRecs=recipes.filter(r=>!r.isSubRecipe).filter(r=>{
-    const q=defRecSearch.toLowerCase();
-    return !q||r.name.toLowerCase().includes(q)||(r.nameTamil||"").includes(defRecSearch);
-  });
+  const [defUnit,setDefUnit]=useState("");
   const addItemDefault=locId=>{
-    if(!defRecId||!defQty)return;
-    setLocations(p=>p.map(l=>l.id===locId?{...l,itemDefaults:{...(l.itemDefaults||{}),[defRecId]:+defQty}}:l));
-    setDefRecId("");setDefQty("");setDefRecSearch("");
-  };
-  const removeItemDefault=(locId,recId)=>{
+    if(!defPrefix.trim()||!defQty)return;
+    const rule={prefix:defPrefix.trim(),qty:+defQty,unit:defUnit.trim()};
     setLocations(p=>p.map(l=>{
       if(l.id!==locId)return l;
-      const rest={...(l.itemDefaults||{})};
-      delete rest[recId];
-      return{...l,itemDefaults:rest};
+      const existing=(l.itemDefaults||[]).filter(r=>r.prefix.toLowerCase()!==rule.prefix.toLowerCase());
+      return{...l,itemDefaults:[...existing,rule]};
     }));
+    setDefPrefix("");setDefQty("");setDefUnit("");
+  };
+  const removeItemDefault=(locId,prefix)=>{
+    setLocations(p=>p.map(l=>l.id===locId?{...l,itemDefaults:(l.itemDefaults||[]).filter(r=>r.prefix!==prefix)}:l));
   };
 
   const usedLocIds=new Set((orders||[]).flatMap(o=>(o.entries||[]).map(e=>e.locId)));
@@ -2561,42 +2584,47 @@ function LocForm({ctx,onClose}){
       {expandedLocId&&(()=>{
         const loc=locations.find(l=>l.id===expandedLocId);
         if(!loc)return null;
-        const defaults=Object.entries(loc.itemDefaults||{});
+        const defaults=loc.itemDefaults||[];
+        const matchCount=defPrefix.trim()?recipes.filter(r=>!r.isSubRecipe&&r.name.toLowerCase().startsWith(defPrefix.trim().toLowerCase())).length:0;
         return(
           <div style={{background:"#FFF8EC",border:"1px solid #F5D76E",borderRadius:8,padding:12,marginBottom:16}}>
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:14,fontWeight:700,color:P.deepBrown,marginBottom:4}}>
               📋 {t("Standard Quantities","நிலையான அளவுகள்")} — {loc.name}
             </div>
             <div style={{fontSize:11,color:P.muted,marginBottom:10}}>
-              {t("Define a per-person quantity for items regularly ordered at this location. When adding this recipe to an order for this location, the quantity auto-fills — you just accept or adjust it.","இந்த இடத்திற்கு வழக்கமான பொருட்களுக்கு ஒரு நபருக்கான அளவை வரையறுக்கவும்.")}
+              {t("Define a per-person quantity by name prefix, not one recipe at a time — e.g. \"KK\" covers every recipe starting with KK (KK-Vendakkai, KK-Cabbage, etc.). When adding a matching recipe to an order here, quantity auto-fills — you just accept or adjust it.","பெயர் முன்னொட்டு அடிப்படையில் அளவை வரையறுக்கவும் — எ.கா. \"KK\" என்பது KK என தொடங்கும் அனைத்து சமையல்களையும் உள்ளடக்கும்.")}
             </div>
             {defaults.length>0&&(
               <div style={{marginBottom:10}}>
-                {defaults.map(([recId,qty])=>{
-                  const rec=recipes.find(r=>r.id===+recId);
-                  return(
-                    <div key={recId} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid #F0E6C8"}}>
-                      <span style={{flex:1,fontSize:13}}>{rec?(lang==="en"?rec.name:(rec.nameTamil||rec.name)):"?"}</span>
-                      <span style={{fontSize:12,color:P.saffron,fontWeight:600}}>{qty} {rec?.yieldUnit||""} {t("/ person","/ நபர்")}</span>
-                      <button style={css.btn("danger",true)} onClick={()=>removeItemDefault(loc.id,recId)}>🗑</button>
-                    </div>
-                  );
-                })}
+                {defaults.map(rule=>(
+                  <div key={rule.prefix} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid #F0E6C8"}}>
+                    <span style={{flex:1,fontSize:13,fontWeight:600}}>{rule.prefix}<span style={{fontWeight:400,color:P.muted}}>*</span></span>
+                    <span style={{fontSize:12,color:P.saffron,fontWeight:600}}>{rule.qty} {rule.unit||""} {t("/ person","/ நபர்")}</span>
+                    <button style={css.btn("danger",true)} onClick={()=>removeItemDefault(loc.id,rule.prefix)}>🗑</button>
+                  </div>
+                ))}
               </div>
             )}
             <div style={{display:"flex",gap:8,alignItems:"flex-end",flexWrap:"wrap"}}>
-              <div style={{flex:1,minWidth:180}}>
-                <label style={css.lbl}>{t("Recipe","சமையல்")}</label>
-                <select style={{...css.sel,width:"100%"}} value={defRecId} onChange={e=>setDefRecId(e.target.value)}>
-                  <option value="">{t("Select recipe...","தேர்வு...")}</option>
-                  {filteredDefRecs.map(r=><option key={r.id} value={r.id}>{lang==="en"?r.name:(r.nameTamil||r.name)}</option>)}
-                </select>
+              <div>
+                <label style={css.lbl}>{t("Name Prefix","பெயர் முன்னொட்டு")}</label>
+                <input style={{...css.inp,width:110}} placeholder="KK, Rice..." value={defPrefix} onChange={e=>setDefPrefix(e.target.value)}/>
               </div>
               <div>
                 <label style={css.lbl}>{t("Qty / person","அளவு / நபர்")}</label>
-                <input type="number" step="0.001" min="0" style={{...css.inp,width:100}} value={defQty} onChange={e=>setDefQty(e.target.value)}/>
+                <input type="number" step="0.001" min="0" style={{...css.inp,width:90}} value={defQty} onChange={e=>setDefQty(e.target.value)}/>
               </div>
-              <button style={css.btn("success")} onClick={()=>addItemDefault(loc.id)} disabled={!defRecId||!defQty}>+ {t("Add","சேர்")}</button>
+              <div>
+                <label style={css.lbl}>{t("Unit","அலகு")}</label>
+                <select style={{...css.sel,width:80}} value={defUnit} onChange={e=>setDefUnit(e.target.value)}>
+                  <option value="">—</option>
+                  {["g","kg","ml","l","nos","pcs"].map(u=><option key={u} value={u}>{u}</option>)}
+                </select>
+              </div>
+              <button style={css.btn("success")} onClick={()=>addItemDefault(loc.id)} disabled={!defPrefix.trim()||!defQty}>+ {t("Add","சேர்")}</button>
+              {defPrefix.trim()&&<span style={{fontSize:11,color:matchCount?P.success:P.danger,paddingBottom:8}}>
+                {matchCount?matchCount+" "+t("recipe(s) match","சமையல்கள் பொருந்தும்"):t("no recipes match this prefix yet","இந்த முன்னொட்டுடன் பொருந்தும் சமையல் இல்லை")}
+              </span>}
             </div>
           </div>
         );
@@ -2791,10 +2819,11 @@ function OrderForm({ctx,ord,onClose}){
           <input style={{...css.inp,fontSize:11}} placeholder={t("Search recipe...","சமையல் தேடு...")} value={recSearch} onChange={e=>{setRecSearch(e.target.value);setNe(n=>({...n,recId:""}));}}/>
           <select style={{...css.sel,width:"100%"}} value={ne.recId} onChange={e=>{
             const recId=e.target.value;
+            const rec=recipes.find(r=>r.id===+recId);
             const loc=locations.find(l=>l.id===+defLocId);
-            const perPerson=loc?.itemDefaults?.[recId];
+            const rule=matchLocDefault(loc,rec);
             const curPax=f.pax&&+f.pax>0?+f.pax:1;
-            setNe(n=>({...n,recId,qty:perPerson!==undefined?String(+(perPerson*curPax).toFixed(3)):n.qty}));
+            setNe(n=>({...n,recId,qty:rule?String(+(rule.qty*curPax).toFixed(3)):n.qty}));
           }}>
             <option value="">{filteredRecs.length>0?t("Select from results...","தேர்வு..."):t("No match","பொருந்தவில்லை")}</option>
             {filteredRecs.map(r=><option key={r.id} value={r.id}>{lang==="en"?r.name:r.nameTamil}</option>)}
@@ -2802,7 +2831,7 @@ function OrderForm({ctx,ord,onClose}){
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:3,justifyContent:"center"}}>
           <label style={{...css.lbl,marginBottom:0}}>{t("Qty","அளவு")}{f.pax&&+f.pax>0?<span style={{color:"#3B82F6",marginLeft:4,fontSize:10}}>for {f.pax} persons</span>:""}
-            {locations.find(l=>l.id===+defLocId)?.itemDefaults?.[ne.recId]!==undefined&&<span style={{color:P.success,marginLeft:4,fontSize:10}}>✓ {t("auto-filled","தானாக நிரப்பப்பட்டது")}</span>}
+            {matchLocDefault(locations.find(l=>l.id===+defLocId),recipes.find(r=>r.id===+ne.recId))&&<span style={{color:P.success,marginLeft:4,fontSize:10}}>✓ {t("auto-filled","தானாக நிரப்பப்பட்டது")}</span>}
           </label>
           <input type="number" min="0" step="0.1" style={{...css.inp,width:80}} value={ne.qty} onChange={e=>setNe({...ne,qty:e.target.value})}/>
         </div>
@@ -4394,6 +4423,263 @@ function RepCompare({ctx}){
         <div style={{fontSize:11,color:P.muted,marginTop:8}}>
           {t("Red bold values mark the recipe using the most of that ingredient, per the same normalized output quantity — useful for spotting e.g. which kuzhambu uses the most chilli powder.","சிவப்பு நிற எண்கள் அதிக பயன்பாட்டைக் காட்டுகின்றன.")}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// REPORT: PER-PERSON QUANTITY (spot entry errors against Standard Quantities)
+// ════════════════════════════════════════════════════════════════════
+function RepPerPerson({ctx}){
+  const {orders,recipes,locations,lang:gLang}=ctx;
+  const [rLang,setRLang]=useState(gLang);
+  const t=(en,ta)=>rLang==="en"?en:ta;
+  const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
+  const [fromDate,setFromDate]=useState(TODAY);
+  const [toDate,setToDate]=useState(TODAY);
+  const [locFilters,setLocFilters]=useState([]); // empty = all locations
+  const toggleLocFilter=id=>setLocFilters(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+  const [onlyFlagged,setOnlyFlagged]=useState(false);
+  const [viewMode,setViewMode]=useState("columnar"); // "columnar" | "list"
+  const round2=v=>Math.round((+v||0)*100)/100;
+
+  const rows=useMemo(()=>{
+    const out=[];
+    orders.filter(o=>!o.isTemplate&&o.date>=fromDate&&o.date<=toDate).forEach(o=>{
+      (o.entries||[]).forEach(e=>{
+        if(locFilters.length&&!locFilters.includes(e.locId))return;
+        const rec=recipes.find(r=>r.id===e.recId);
+        const loc=locations.find(l=>l.id===e.locId);
+        if(!rec||!loc)return;
+        const pax=e.basePax||+o.pax||null;
+        const perPerson=pax?e.qty/pax:null;
+        const rule=matchLocDefault(loc,rec);
+        const expected=rule?rule.qty:null;
+        const deviation=(expected&&perPerson!==null)?((perPerson-expected)/expected*100):null;
+        out.push({
+          key:o.id+"_"+e.locId+"_"+e.recId+"_"+e.session,
+          date:o.date,orderName:o.name,loc,rec,session:e.session,
+          qty:e.qty,unit:e.yu||rec.yieldUnit||"",pax,perPerson,expected,deviation,
+        });
+      });
+    });
+    return out.sort((a,b)=>Math.abs(b.deviation??0)-Math.abs(a.deviation??0));
+  },[orders,recipes,locations,fromDate,toDate,locFilters]);
+
+  // Columnar view: rows = recipe+session, columns = location, cell = avg qty/person.
+  // A cell is flagged either against its location's own Standard Quantity (if defined)
+  // or, failing that, against the row's own median across sibling locations — so an
+  // outlier location jumps out even when no Standard Quantity rule exists yet.
+  const {colLocations,gridRows}=useMemo(()=>{
+    const withPerPerson=rows.filter(r=>r.perPerson!==null);
+    const usedLocIds=[...new Set(withPerPerson.map(r=>r.loc.id))];
+    const cols=locations.filter(l=>usedLocIds.includes(l.id));
+
+    const byKey={}; // "recId_session" -> {rec,session,cells:{locId:[perPerson,...]}}
+    withPerPerson.forEach(r=>{
+      const key=r.rec.id+"_"+r.session;
+      if(!byKey[key])byKey[key]={rec:r.rec,session:r.session,cells:{}};
+      if(!byKey[key].cells[r.loc.id])byKey[key].cells[r.loc.id]=[];
+      byKey[key].cells[r.loc.id].push(r.perPerson);
+    });
+
+    const grid=Object.values(byKey).map(row=>{
+      const avgByLoc={};
+      Object.entries(row.cells).forEach(([locId,vals])=>{
+        avgByLoc[locId]=vals.reduce((s,v)=>s+v,0)/vals.length;
+      });
+      const vals=Object.values(avgByLoc);
+      const sorted=[...vals].sort((a,b)=>a-b);
+      const median=sorted.length?sorted[Math.floor(sorted.length/2)]:null;
+      return{...row,avgByLoc,median};
+    }).sort((a,b)=>n(a.rec).localeCompare(n(b.rec)));
+
+    return{colLocations:cols,gridRows:grid};
+  },[rows,locations]);
+
+  const cellDeviation=(row,locId)=>{
+    const val=row.avgByLoc[locId];
+    if(val===undefined)return{val:null,dev:null};
+    const loc=colLocations.find(l=>l.id===locId);
+    const rule=matchLocDefault(loc,row.rec);
+    if(rule)return{val,dev:(val-rule.qty)/rule.qty*100,vsExpected:true};
+    if(row.median)return{val,dev:(val-row.median)/row.median*100,vsExpected:false};
+    return{val,dev:null};
+  };
+
+  const flaggedRows=rows.filter(r=>r.deviation!==null&&Math.abs(r.deviation)>=20);
+  const displayRows=onlyFlagged?flaggedRows:rows;
+  const hasData=rows.length>0;
+
+  const doExport=()=>{
+    const data=displayRows.map(r=>({
+      [t("Date","தேதி")]:r.date,
+      [t("Order","ஆர்டர்")]:r.orderName,
+      [t("Location","இடம்")]:n(r.loc),
+      [t("Session","அமர்வு")]:r.session,
+      [t("Recipe","சமையல்")]:n(r.rec),
+      [t("Qty","அளவு")]:round2(r.qty),
+      [t("Pax","பாக்ஸ்")]:r.pax||"",
+      [t("Qty/Person","ஒரு நபருக்கு")]:r.perPerson!==null?round2(r.perPerson):"",
+      [t("Expected/Person","எதிர்பார்க்கப்படும்")]:r.expected!==null?round2(r.expected):"",
+      [t("Deviation %","மாறுபாடு %")]:r.deviation!==null?round2(r.deviation):"",
+    }));
+    exportXlsxSheets("per_person_qty_"+fromDate+"_to_"+toDate+".xlsx",[{name:"Per Person Qty",data}]);
+  };
+
+  const doPrint=()=>{
+    const trows=displayRows.map(r=>{
+      const devColor=r.deviation===null?"#999":Math.abs(r.deviation)>=20?"#C0392B":"#1A7A40";
+      return "<tr><td>"+r.date+"</td><td>"+n(r.loc)+"</td><td>"+r.session+"</td><td>"+n(r.rec)+"</td>"+
+        "<td style='text-align:right'>"+round2(r.qty)+" "+r.unit+"</td>"+
+        "<td style='text-align:right'>"+(r.pax||"—")+"</td>"+
+        "<td style='text-align:right;font-weight:700'>"+(r.perPerson!==null?round2(r.perPerson):"—")+"</td>"+
+        "<td style='text-align:right'>"+(r.expected!==null?round2(r.expected):"—")+"</td>"+
+        "<td style='text-align:right;color:"+devColor+";font-weight:700'>"+(r.deviation!==null?(r.deviation>0?"+":"")+round2(r.deviation)+"%":"—")+"</td></tr>";
+    }).join("");
+    printHTML(t("Per-Person Quantity","ஒரு நபர் அளவு")+" ("+fromDate+" – "+toDate+")",
+      "<table><thead><tr><th>"+t("Date","தேதி")+"</th><th>"+t("Location","இடம்")+"</th><th>"+t("Session","அமர்வு")+"</th><th>"+t("Recipe","சமையல்")+
+      "</th><th>"+t("Qty","அளவு")+"</th><th>"+t("Pax","பாக்ஸ்")+"</th><th>"+t("Qty/Person","ஒரு நபருக்கு")+"</th><th>"+t("Expected","எதிர்பார்க்கப்படும்")+"</th><th>"+t("Dev %","மாறுபாடு")+
+      "</th></tr></thead><tbody>"+trows+"</tbody></table>");
+  };
+
+  return(
+    <div>
+      <ReportBar onPrint={hasData?doPrint:null} onExport={hasData?doExport:null} lang={rLang} setLang={setRLang}>
+        <div>
+          <label style={css.lbl}>{t("From","இருந்து")}</label>
+          <input type="date" style={{...css.inp,width:150}} value={fromDate} onChange={e=>{setFromDate(e.target.value);if(e.target.value>toDate)setToDate(e.target.value);}}/>
+        </div>
+        <div>
+          <label style={css.lbl}>{t("To","வரை")}</label>
+          <input type="date" style={{...css.inp,width:150}} value={toDate} onChange={e=>{setToDate(e.target.value);if(e.target.value<fromDate)setFromDate(e.target.value);}}/>
+        </div>
+      </ReportBar>
+
+      {locations.length>0&&(
+        <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+          <span style={{fontSize:11,color:P.muted,marginRight:2}}>{t("Locations:","இடங்கள்:")}</span>
+          <button style={css.btn(locFilters.length===0?"primary":"ghost",true)} onClick={()=>setLocFilters([])}>{t("All","அனைத்தும்")}</button>
+          {locations.map(l=>(
+            <label key={l.id} style={{display:"flex",alignItems:"center",gap:4,fontSize:12,cursor:"pointer",
+              background:locFilters.includes(l.id)?P.saffron+"22":"transparent",
+              border:"1px solid "+(locFilters.includes(l.id)?P.saffron:"#DCC88A"),borderRadius:7,padding:"4px 9px"}}>
+              <input type="checkbox" checked={locFilters.includes(l.id)} onChange={()=>toggleLocFilter(l.id)}/>
+              {n(l)}
+            </label>
+          ))}
+        </div>
+      )}
+
+      <div style={{fontSize:11,color:P.muted,marginBottom:10}}>
+        {t("Shows every order entry's actual quantity per person, compared against that location's Standard Quantity (if defined). Rows are sorted by biggest deviation first, so likely data-entry errors surface at the top.","ஒவ்வொரு ஆர்டர் பதிவின் உண்மையான ஒரு நபர் அளவையும், நிலையான அளவுடன் ஒப்பிட்டு காட்டுகிறது.")}
+      </div>
+
+      <div style={{display:"flex",gap:6,marginBottom:14}}>
+        <button style={css.btn(viewMode==="columnar"?"primary":"ghost",true)} onClick={()=>setViewMode("columnar")}>📍 {t("By Location (Columnar)","இடம் வாரியாக")}</button>
+        <button style={css.btn(viewMode==="list"?"primary":"ghost",true)} onClick={()=>setViewMode("list")}>📋 {t("Detailed List","விரிவான பட்டியல்")}</button>
+      </div>
+
+      {viewMode==="list"&&(
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer"}}>
+          <input type="checkbox" checked={onlyFlagged} onChange={e=>setOnlyFlagged(e.target.checked)}/>
+          {t("Show only flagged (≥20% off expected)","≥20% வேறுபாடு உள்ளவை மட்டும்")}
+        </label>
+        {flaggedRows.length>0&&<span style={{...css.badge(P.danger),fontSize:11}}>⚠ {flaggedRows.length} {t("flagged","குறியிடப்பட்டவை")}</span>}
+      </div>
+      )}
+
+      {viewMode==="columnar"?(
+        !gridRows.length?(
+          <div style={{color:P.muted,textAlign:"center",padding:32}}>{t("No orders with a known pax in this range.","இந்த வரம்பில் பாக்ஸ் அறியப்பட்ட ஆர்டர் இல்லை.")}</div>
+        ):(
+          <>
+            <div style={{fontSize:11,color:P.muted,marginBottom:10}}>
+              {t("Each row is one recipe; each column is a location's average qty/person across this date range. A cell is compared against that location's own Standard Quantity if defined (marked *), otherwise against this row's median across locations.","ஒவ்வொரு வரிசையும் ஒரு சமையல்; ஒவ்வொரு நெடுவரிசையும் ஒரு இடம்.")}
+            </div>
+            <div style={{...css.card,padding:0,overflow:"auto"}}>
+              <table style={css.table}>
+                <thead><tr>
+                  <th style={css.th}>{t("Recipe","சமையல்")}</th>
+                  <th style={css.th}>{t("Session","அமர்வு")}</th>
+                  {colLocations.map(l=><th key={l.id} style={{...css.th,textAlign:"right",minWidth:90}}>{n(l)}</th>)}
+                </tr></thead>
+                <tbody>
+                  {gridRows.map((row,i)=>(
+                    <tr key={row.rec.id+"_"+row.session} style={{background:i%2===0?P.white:P.highlight}}>
+                      <td style={css.td}><strong>{n(row.rec)}</strong></td>
+                      <td style={css.td}><span style={css.badge(SCOLOR[row.session]||P.muted)}>{row.session}</span></td>
+                      {colLocations.map(l=>{
+                        const {val,dev,vsExpected}=cellDeviation(row,l.id);
+                        const flagged=dev!==null&&Math.abs(dev)>=20;
+                        return(
+                          <td key={l.id} style={{...css.td,textAlign:"right",background:flagged?"#FEF2F2":undefined}}>
+                            {val===undefined||val===null?<span style={{color:"#DDD"}}>—</span>:(
+                              <span style={{fontWeight:flagged?700:400,color:flagged?P.danger:P.deepBrown}}>
+                                {round2(val)}{vsExpected&&<span style={{color:P.saffron}}>*</span>}
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{fontSize:10,color:P.muted,marginTop:6}}>* {t("compared against this location's own Standard Quantity","இந்த இடத்தின் சொந்த நிலையான அளவுடன் ஒப்பிடப்பட்டது")}</div>
+          </>
+        )
+      ):(
+      <>
+      {!hasData?(
+        <div style={{color:P.muted,textAlign:"center",padding:32}}>{t("No orders in this range.","இந்த வரம்பில் ஆர்டர் இல்லை.")}</div>
+      ):displayRows.length===0?(
+        <div style={{color:P.success,textAlign:"center",padding:32}}>✅ {t("No flagged entries in this range.","இந்த வரம்பில் குறியிடப்பட்டவை இல்லை.")}</div>
+      ):(
+        <div style={{...css.card,padding:0,overflow:"auto"}}>
+          <table style={css.table}>
+            <thead><tr>
+              <th style={css.th}>{t("Date","தேதி")}</th>
+              <th style={css.th}>{t("Location","இடம்")}</th>
+              <th style={css.th}>{t("Session","அமர்வு")}</th>
+              <th style={css.th}>{t("Recipe","சமையல்")}</th>
+              <th style={{...css.th,textAlign:"right"}}>{t("Qty","அளவு")}</th>
+              <th style={{...css.th,textAlign:"right"}}>{t("Pax","பாக்ஸ்")}</th>
+              <th style={{...css.th,textAlign:"right"}}>{t("Qty/Person","ஒரு நபருக்கு")}</th>
+              <th style={{...css.th,textAlign:"right"}}>{t("Expected","எதிர்பார்க்கப்படும்")}</th>
+              <th style={{...css.th,textAlign:"right"}}>{t("Deviation","மாறுபாடு")}</th>
+            </tr></thead>
+            <tbody>
+              {displayRows.map((r,i)=>{
+                const flagged=r.deviation!==null&&Math.abs(r.deviation)>=20;
+                return(
+                  <tr key={r.key} style={{background:flagged?"#FEF2F2":(i%2===0?P.white:P.highlight)}}>
+                    <td style={css.td}>{r.date}</td>
+                    <td style={css.td}>{n(r.loc)}</td>
+                    <td style={css.td}><span style={css.badge(SCOLOR[r.session]||P.muted)}>{r.session}</span></td>
+                    <td style={css.td}><strong>{n(r.rec)}</strong></td>
+                    <td style={{...css.td,textAlign:"right"}}>{round2(r.qty)} {r.unit}</td>
+                    <td style={{...css.td,textAlign:"right"}}>{r.pax||"—"}</td>
+                    <td style={{...css.td,textAlign:"right"}}><strong>{r.perPerson!==null?round2(r.perPerson):"—"}</strong></td>
+                    <td style={{...css.td,textAlign:"right",color:P.muted}}>{r.expected!==null?round2(r.expected):"—"}</td>
+                    <td style={{...css.td,textAlign:"right"}}>
+                      {r.deviation!==null?(
+                        <span style={{...css.badge(Math.abs(r.deviation)>=20?P.danger:P.success),fontSize:11,fontWeight:700}}>
+                          {r.deviation>0?"+":""}{round2(r.deviation)}%
+                        </span>
+                      ):<span style={{color:"#CCC"}}>—</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      </>
       )}
     </div>
   );
