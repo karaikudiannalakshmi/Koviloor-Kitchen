@@ -313,6 +313,20 @@ function IngredientPicker({ingredients,value,onChange,lang,placeholder,style}){
 }
 
 // ── Simple Levenshtein distance, used for duplicate-ingredient-name detection ──
+// Normalizes a date cell/string from Excel (JS Date object, serial number already
+// converted by cellDates:true, or a typed string in various formats) to YYYY-MM-DD.
+function normalizeDateCell(val){
+  if(val instanceof Date&&!isNaN(val))return val.toISOString().slice(0,10);
+  const s=(val+"").trim();
+  if(!s)return null;
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
+  let m=s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/); // DD-MM-YYYY or DD/MM/YYYY
+  if(m)return m[3]+"-"+String(m[2]).padStart(2,"0")+"-"+String(m[1]).padStart(2,"0");
+  const d=new Date(s);
+  if(!isNaN(d))return d.toISOString().slice(0,10);
+  return null;
+}
+
 function levenshtein(a,b){
   a=(a||"").toLowerCase(); b=(b||"").toLowerCase();
   const m=a.length,n=b.length;
@@ -5520,20 +5534,6 @@ function OccOrdersPage({ctx}){
   const [customMsg,setCustomMsg]=useState("");
   const customFileRef=useRef();
 
-  // Normalizes a date cell/string from Excel (JS Date object, serial number already
-  // converted by cellDates:true, or a typed string in various formats) to YYYY-MM-DD.
-  const normalizeDateCell=val=>{
-    if(val instanceof Date&&!isNaN(val))return val.toISOString().slice(0,10);
-    const s=(val+"").trim();
-    if(!s)return null;
-    if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
-    let m=s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/); // DD-MM-YYYY or DD/MM/YYYY
-    if(m)return m[3]+"-"+String(m[2]).padStart(2,"0")+"-"+String(m[1]).padStart(2,"0");
-    const d=new Date(s);
-    if(!isNaN(d))return d.toISOString().slice(0,10);
-    return null;
-  };
-
   const createOccOrdersForDates=(tpl,dates)=>{
     const existing=new Set(occOrders.filter(o=>o.templateId===tpl.id).map(o=>o.date));
     const toCreate=dates.filter(d=>!existing.has(d));
@@ -5813,6 +5813,78 @@ function InvPage({ctx}){
   const [openStockDate,setOpenStockDate]=useState(TODAY);
   const [openStockMsg,setOpenStockMsg]=useState("");
 
+  const ledgerFileRef=useRef();
+  const [ledgerMsg,setLedgerMsg]=useState("");
+
+  // Reads a cell by trying several possible header names, in order.
+  const getCellVal=(r,keys)=>{
+    for(const k of keys){
+      const foundKey=Object.keys(r).find(rk=>rk.toLowerCase().trim()===k);
+      if(foundKey!==undefined&&r[foundKey]!==undefined&&r[foundKey]!=="")return r[foundKey];
+    }
+    return undefined;
+  };
+
+  const importLedgerPurchases=e=>{
+    const file=e.target.files[0]; if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const wb=XLSX.read(ev.target.result,{type:"binary",cellDates:true});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{defval:"",raw:false,dateNF:"yyyy-mm-dd"});
+      if(!rows.length){setLedgerMsg(t("The file has no rows.","கோப்பில் தரவு இல்லை."));e.target.value="";return;}
+
+      let imported=0,skippedZero=0; const unmatched=[]; const dupSkipped=[];
+      setInventory(prev=>{
+        let purchases=[...prev.purchases];
+        // Build a signature set of existing ledger-imported purchases to avoid double-import
+        // if the same export (or an overlapping date range) gets uploaded again.
+        const existingSig=new Set(
+          purchases.filter(p=>p.source==="ledger_import")
+            .map(p=>p.iid+"|"+p.date+"|"+p.qty+"|"+p.cpu+"|"+(p.billNo||""))
+        );
+
+        rows.forEach(r=>{
+          const name=(getCellVal(r,["item","ingredient","name","பொருள்"])+"").trim();
+          if(!name)return;
+          const dateRaw=getCellVal(r,["date","bill date","billdate","தேதி"]);
+          const date=normalizeDateCell(dateRaw)||TODAY;
+          const qty=+getCellVal(r,["qty","quantity","அளவு"])||0;
+          if(!qty){skippedZero++;return;}
+          let cpu=+getCellVal(r,["rate","cost","cost per unit","price","effrate","விலை"])||0;
+          const amount=+getCellVal(r,["amount","gross","தொகை"])||0;
+          if(!cpu&&amount&&qty)cpu=+(amount/qty).toFixed(4);
+          const unit=(getCellVal(r,["unit","அலகு"])+"").trim();
+          const vendor=(getCellVal(r,["vendor","vendorname","supplier","வணிகர்"])+"").trim();
+          const billNo=(getCellVal(r,["bill no","billno","bill","invoice no"])+"").trim();
+
+          const nameLC=name.toLowerCase();
+          const ing=ingredients.find(x=>x.name.toLowerCase()===nameLC||(x.nameTamil||"").toLowerCase()===nameLC);
+          if(!ing){unmatched.push(name);return;}
+
+          const sig=ing.id+"|"+date+"|"+qty+"|"+cpu+"|"+billNo;
+          if(existingSig.has(sig)){dupSkipped.push(name+" ("+date+")");return;}
+          existingSig.add(sig);
+
+          purchases.push({
+            id:Date.now()+ing.id+Math.random(),iid:ing.id,date,qty,unit:unit||ing.unit,cpu,
+            supplier:vendor||"",note:billNo?"Bill #"+billNo:"",billNo,source:"ledger_import",
+          });
+          imported++;
+        });
+        return{...prev,purchases};
+      });
+
+      const parts=[imported+" "+t("purchase(s) imported","கொள்முதல்கள் இறக்கப்பட்டன")];
+      if(dupSkipped.length)parts.push(dupSkipped.length+" "+t("already imported, skipped","ஏற்கனவே இறக்கப்பட்டது"));
+      if(skippedZero)parts.push(skippedZero+" "+t("row(s) with no quantity, skipped","அளவு இல்லாத வரிசைகள்"));
+      if(unmatched.length)parts.push(unmatched.length+" "+t("not matched","பொருந்தவில்லை")+": "+[...new Set(unmatched)].slice(0,6).join(", "));
+      setLedgerMsg(parts.join(" · "));
+      e.target.value="";
+    };
+    reader.readAsBinaryString(file);
+  };
+
   const downloadOpeningStockTemplate=()=>{
     const data=ingredients.map(ing=>({
       Ingredient:ing.name,
@@ -6037,6 +6109,20 @@ function InvPage({ctx}){
       )}
 
       {tab==="purchases"&&(
+        <div style={{...css.card,background:"#F0FDF4",border:"1px solid #86EFAC",marginBottom:14}}>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:P.deepBrown,marginBottom:8}}>
+            📥 {t("Import Purchases from Ledger App","லெட்ஜர் ஆப்பிலிருந்து கொள்முதல் இறக்கு")}
+          </div>
+          <div style={{fontSize:11,color:P.muted,marginBottom:10}}>
+            {t("If you're already recording purchases in your separate Purchase Ledger app, export the bills/items to Excel and upload here instead of re-entering. Columns recognized: Item/Ingredient, Date, Qty, Rate (or Amount), Unit, Vendor, Bill No (all optional except Item and Qty). Re-uploading the same export is safe — matching rows (same ingredient, date, qty, rate, bill no) are skipped automatically, not duplicated.","கொள்முதல் லெட்ஜர் ஆப்பிலிருந்து Excel ஏற்றி இங்கே பதிவேற்றவும். மீண்டும் பதிவேற்றினால் நகல்கள் தவிர்க்கப்படும்.")}
+          </div>
+          <button style={css.btn("success",true)} onClick={()=>ledgerFileRef.current.click()}>📤 {t("Import from Excel","Excel இறக்கு")}</button>
+          <input ref={ledgerFileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importLedgerPurchases}/>
+          {ledgerMsg&&<div style={{fontSize:12,color:"#166534",fontWeight:600,marginTop:10}}>✓ {ledgerMsg}</div>}
+        </div>
+      )}
+
+      {tab==="purchases"&&(
         <div style={{...css.card,background:"#EFF6FF",border:"1px solid #93C5FD",marginBottom:14}}>
           <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:P.deepBrown,marginBottom:8}}>
             🔄 {t("Update Stock Levels (regular use)","இருப்பு புதுப்பிப்பு (வழக்கமான பயன்பாடு)")}
@@ -6134,7 +6220,12 @@ function InvPage({ctx}){
                     <td style={css.td}>{norm?<span style={{color:P.purple}}>₹{norm}</span>:<span style={{color:"#CCC"}}>—</span>}</td>
                     <td style={css.td}>{dev!==null?<span style={{...css.badge(devColor),fontWeight:700}}>{dev>0?"+":""}{dev.toFixed(1)}%</span>:<span style={{color:"#CCC"}}>—</span>}</td>
                     <td style={css.td}><strong>₹{(p.qty*p.cpu).toFixed(0)}</strong></td>
-                    <td style={css.td}>{p.supplier}</td>
+                    <td style={css.td}>
+                      {p.supplier}
+                      {p.source==="ledger_import"&&<span style={{...css.badge(P.info),fontSize:9,marginLeft:6}}>📥 {t("Ledger","லெட்ஜர்")}</span>}
+                      {p.source==="opening_stock"&&<span style={{...css.badge(P.purple),fontSize:9,marginLeft:6}}>📦 {t("Opening","தொடக்க")}</span>}
+                      {p.source==="stock_adjustment"&&<span style={{...css.badge(P.danger),fontSize:9,marginLeft:6}}>⚠️ {t("Adj","சரி")}</span>}
+                    </td>
                     <td style={css.td}><button style={css.btn("danger",true)} onClick={()=>setInventory(pr=>({...pr,purchases:pr.purchases.filter(x=>x.id!==p.id)}))}>🗑</button></td>
                   </tr>
                 );
