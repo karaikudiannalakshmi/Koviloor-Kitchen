@@ -4440,6 +4440,7 @@ function RepPerPerson({ctx}){
   const [toDate,setToDate]=useState(TODAY);
   const [locFilters,setLocFilters]=useState([]); // empty = all locations
   const toggleLocFilter=id=>setLocFilters(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+  const [sessFilter,setSessFilter]=useState("All");
   const [onlyFlagged,setOnlyFlagged]=useState(false);
   const [viewMode,setViewMode]=useState("columnar"); // "columnar" | "list"
   const round2=v=>Math.round((+v||0)*100)/100;
@@ -4449,6 +4450,7 @@ function RepPerPerson({ctx}){
     orders.filter(o=>!o.isTemplate&&o.date>=fromDate&&o.date<=toDate).forEach(o=>{
       (o.entries||[]).forEach(e=>{
         if(locFilters.length&&!locFilters.includes(e.locId))return;
+        if(sessFilter!=="All"&&e.session!==sessFilter)return;
         const rec=recipes.find(r=>r.id===e.recId);
         const loc=locations.find(l=>l.id===e.locId);
         if(!rec||!loc)return;
@@ -4465,7 +4467,7 @@ function RepPerPerson({ctx}){
       });
     });
     return out.sort((a,b)=>Math.abs(b.deviation??0)-Math.abs(a.deviation??0));
-  },[orders,recipes,locations,fromDate,toDate,locFilters]);
+  },[orders,recipes,locations,fromDate,toDate,locFilters,sessFilter]);
 
   // Columnar view: rows = recipe+session, columns = location, cell = avg qty/person.
   // A cell is flagged either against its location's own Standard Quantity (if defined)
@@ -4558,7 +4560,7 @@ function RepPerPerson({ctx}){
       </ReportBar>
 
       {locations.length>0&&(
-        <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+        <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
           <span style={{fontSize:11,color:P.muted,marginRight:2}}>{t("Locations:","இடங்கள்:")}</span>
           <button style={css.btn(locFilters.length===0?"primary":"ghost",true)} onClick={()=>setLocFilters([])}>{t("All","அனைத்தும்")}</button>
           {locations.map(l=>(
@@ -4571,6 +4573,17 @@ function RepPerPerson({ctx}){
           ))}
         </div>
       )}
+
+      <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+        <span style={{fontSize:11,color:P.muted,marginRight:2}}>{t("Session:","அமர்வு:")}</span>
+        {["All",...SESSIONS].map(s=>(
+          <button key={s} style={{...css.btn(sessFilter===s?"primary":"ghost",true),
+            borderColor:s!=="All"?(SCOLOR[s]||P.muted):"#DCC88A",
+            color:sessFilter===s?"white":(s!=="All"?SCOLOR[s]:P.deepBrown),
+            background:sessFilter===s?(SCOLOR[s]||P.saffron):"transparent",
+          }} onClick={()=>setSessFilter(s)}>{s==="All"?t("All","அனைத்தும்"):s}</button>
+        ))}
+      </div>
 
       <div style={{fontSize:11,color:P.muted,marginBottom:10}}>
         {t("Shows every order entry's actual quantity per person, compared against that location's Standard Quantity (if defined). Rows are sorted by biggest deviation first, so likely data-entry errors surface at the top.","ஒவ்வொரு ஆர்டர் பதிவின் உண்மையான ஒரு நபர் அளவையும், நிலையான அளவுடன் ஒப்பிட்டு காட்டுகிறது.")}
