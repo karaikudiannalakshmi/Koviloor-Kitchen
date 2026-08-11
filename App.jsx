@@ -645,8 +645,8 @@ function App(){
       </main>
 
       {modal&&(
-        <div style={css.modal} onClick={()=>setModal(null)}>
-          <div style={css.mbox(modal.w||700)} onClick={e=>e.stopPropagation()}>
+        <div style={css.modal} onMouseDown={e=>{if(e.target===e.currentTarget)setModal(null);}}>
+          <div style={css.mbox(modal.w||700)}>
             {modal.type==="recipe"&&<RecForm ctx={ctx} rec={modal.rec} onClose={()=>setModal(null)}/>}
             {modal.type==="recDetail"&&<RecDetail ctx={ctx} rec={modal.rec} onClose={()=>setModal(null)}/>}
             {modal.type==="order"&&<OrderForm ctx={ctx} ord={modal.ord} onClose={()=>setModal(null)}/>}
@@ -1872,6 +1872,24 @@ function RecForm({ctx,rec,onClose}){
 function OrdersPage({ctx}){
   const {orders,setOrders,locations,recipes,ingredients,lang,setModal}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
+
+  // One-time backfill: any order saved before cost-snapshotting existed gets its cost
+  // frozen to today's prices now, so a future Sync Norm Costs run won't silently move it.
+  // Without this, only orders created/edited after this deploy would actually be protected.
+  useEffect(()=>{
+    const needsBackfill=orders.some(o=>!o.isTemplate&&o.costSnapshot===undefined);
+    if(!needsBackfill)return;
+    setOrders(prev=>prev.map(o=>{
+      if(o.isTemplate||o.costSnapshot!==undefined)return o;
+      const total=(o.entries||[]).reduce((sum,e)=>{
+        const rec=recipes.find(r=>r.id===e.recId); if(!rec)return sum;
+        return sum+computeRecipeCost(rec,effectiveQty(e,o)/(rec.yield||1),recipes,ingredients);
+      },0);
+      return{...o,costSnapshot:+total.toFixed(2)};
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+
   const SESS_ORDER={Breakfast:0,Lunch:1,Snack:2,Dinner:3};
   // Sort by date desc, then by session order
   const sortOrders=arr=>[...arr].sort((a,b)=>{
@@ -1963,7 +1981,7 @@ function OrdersPage({ctx}){
               else mergedEntries.push(en);
             });
             const nameNeedsGuruMark=isGuru&&!existing.name.includes("🕉️");
-            next[existingIdx]={...existing,entries:mergedEntries,
+            next[existingIdx]={...existing,entries:mergedEntries,costSnapshot:costOfEntries(mergedEntries),
               name:nameNeedsGuruMark?"🕉️ "+t("Gurupooja Menu","குருபூஜை உணவு")+" — "+dateStr:existing.name};
             updated++;
           } else {
@@ -1971,7 +1989,7 @@ function OrdersPage({ctx}){
             next.push({
               id:idCounter++,
               name:(isGuru?"🕉️ "+t("Gurupooja Menu","குருபூஜை உணவு"):t("Menu","உணவு பட்டியல்"))+" — "+dateStr,
-              date:dateStr,isTemplate:false,pax:paxVal,source:"excel_import",entries,
+              date:dateStr,isTemplate:false,pax:paxVal,source:"excel_import",entries,costSnapshot:costOfEntries(entries),
             });
             created++;
           }
@@ -2014,6 +2032,13 @@ function OrdersPage({ctx}){
     .flatMap(o=>o.entries||[])
     .filter(e=>dupSess==="All"||e.session===dupSess).length;
 
+  // Computes a cost snapshot for a set of entries — used to freeze cost on freshly
+  // duplicated orders at today's ingredient prices, same as OrderForm does on save.
+  const costOfEntries=entries=>+entries.reduce((s,e)=>{
+    const rec=recipes.find(r=>r.id===e.recId);
+    return s+(rec?computeRecipeCost(rec,e.qty/(rec.yield||1),recipes,ingredients):0);
+  },0).toFixed(2);
+
   const duplicateDay=()=>{
     if(!dupFrom||!dupTo)return;
     if(dupFrom===dupTo){alert(t("Source and target date are the same.","இருந்து மற்றும் புதிய தேதி ஒன்றே."));return;}
@@ -2024,7 +2049,7 @@ function OrdersPage({ctx}){
       const entries=(o.entries||[]).filter(e=>dupSess==="All"||e.session===dupSess);
       if(!entries.length)return;
       const newEntries=entries.map(e=>({...e}));
-      copies.push({...o,id:Date.now()+i,date:dupTo,name:o.name,entries:newEntries});
+      copies.push({...o,id:Date.now()+i,date:dupTo,name:o.name,entries:newEntries,costSnapshot:costOfEntries(newEntries)});
     });
     if(!copies.length){alert(t("No entries found for that date and session.","அந்த தேதி / அமர்வுக்கு பதிவுகள் இல்லை."));return;}
     setOrders(p=>[...p,...copies]);
@@ -2053,7 +2078,7 @@ function OrdersPage({ctx}){
     const copies=source.map((o,i)=>{
       const newDate=new Date(new Date(o.date).getTime()+offsetMs).toISOString().slice(0,10);
       const newEntries=(o.entries||[]).map(en=>({...en}));
-      return{...o,id:Date.now()+i,date:newDate,name:o.name,entries:newEntries};
+      return{...o,id:Date.now()+i,date:newDate,name:o.name,entries:newEntries,costSnapshot:costOfEntries(newEntries)};
     });
     setOrders(p=>[...p,...copies]);
     setDupOpen(false);
@@ -2095,8 +2120,8 @@ function OrdersPage({ctx}){
         if(!entries.length)return;
         const targetLoc=locations.find(l=>l.id===targetId);
         const locLabel=targetLoc?(lang==="en"?targetLoc.name:(targetLoc.nameTamil||targetLoc.name)):"";
-        const newName=locLabel?o.name+" - "+locLabel:o.name;
-        newOrders.push({id:idc++,name:newName,date:dupLocDate,isTemplate:false,pax:targetPax||"",entries});
+        const newName=locLabel||o.name;
+        newOrders.push({id:idc++,name:newName,date:dupLocDate,isTemplate:false,pax:targetPax||"",entries,costSnapshot:costOfEntries(entries)});
       });
     });
     setOrders(p=>[...p,...newOrders]);
@@ -2125,7 +2150,7 @@ function OrdersPage({ctx}){
       sourceOrders.forEach(o=>{
         const entries=(o.entries||[]).filter(e=>e.locId===srcLocId&&(dupRepSess==="All"||e.session===dupRepSess)).map(e=>({...e}));
         if(!entries.length)return;
-        newOrders.push({id:idc++,name:o.name,date:dateStr,isTemplate:false,pax:"",entries});
+        newOrders.push({id:idc++,name:o.name,date:dateStr,isTemplate:false,pax:"",entries,costSnapshot:costOfEntries(entries)});
       });
     }
     setOrders(p=>[...p,...newOrders]);
@@ -2404,7 +2429,7 @@ function OrdersPage({ctx}){
                   <td style={css.td}><div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{sess.map(s=><span key={s} style={css.badge(SCOLOR[s]||P.muted)}>{s}</span>)}</div></td>
                   <td style={{...css.td,textAlign:"center"}}>{ord.entries.length}</td>
                   <td style={css.td}>{(()=>{
-                    const totalCost=ord.entries.reduce((sum,e)=>{
+                    const totalCost=ord.costSnapshot!==undefined?ord.costSnapshot:ord.entries.reduce((sum,e)=>{
                       const rec=recipes.find(r=>r.id===e.recId); if(!rec)return sum;
                       return sum+computeRecipeCost(rec,effectiveQty(e,ord)/(rec.yield||1),recipes,ingredients);
                     },0);
@@ -2442,12 +2467,34 @@ function OrdersPage({ctx}){
 }
 
 function LocForm({ctx,onClose}){
-  const {lang,setLocations,locations,orders}=ctx;
+  const {lang,setLocations,locations,orders,recipes}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
   const [f,setF]=useState({name:"",nameTamil:""});
   const [editId,setEditId]=useState(null);
   const [editF,setEditF]=useState({});
   const [err,setErr]=useState("");
+
+  const [expandedLocId,setExpandedLocId]=useState(null);
+  const [defRecId,setDefRecId]=useState("");
+  const [defQty,setDefQty]=useState("");
+  const [defRecSearch,setDefRecSearch]=useState("");
+  const filteredDefRecs=recipes.filter(r=>!r.isSubRecipe).filter(r=>{
+    const q=defRecSearch.toLowerCase();
+    return !q||r.name.toLowerCase().includes(q)||(r.nameTamil||"").includes(defRecSearch);
+  });
+  const addItemDefault=locId=>{
+    if(!defRecId||!defQty)return;
+    setLocations(p=>p.map(l=>l.id===locId?{...l,itemDefaults:{...(l.itemDefaults||{}),[defRecId]:+defQty}}:l));
+    setDefRecId("");setDefQty("");setDefRecSearch("");
+  };
+  const removeItemDefault=(locId,recId)=>{
+    setLocations(p=>p.map(l=>{
+      if(l.id!==locId)return l;
+      const rest={...(l.itemDefaults||{})};
+      delete rest[recId];
+      return{...l,itemDefaults:rest};
+    }));
+  };
 
   const usedLocIds=new Set((orders||[]).flatMap(o=>(o.entries||[]).map(e=>e.locId)));
 
@@ -2501,6 +2548,7 @@ function LocForm({ctx,onClose}){
                   <span style={{flex:1,fontWeight:600,color:P.deepBrown}}>{loc.name}</span>
                   <span style={{flex:1,color:P.muted,fontSize:12,fontFamily:"Noto Sans Tamil"}}>{loc.nameTamil||"—"}</span>
                   {usedLocIds.has(loc.id)&&<span style={{...css.badge(P.success),fontSize:10}}>in use</span>}
+                  <button style={css.btn(expandedLocId===loc.id?"primary":"ghost",true)} onClick={()=>setExpandedLocId(expandedLocId===loc.id?null:loc.id)}>📋 {t("Qty","அளவு")}</button>
                   <button style={css.btn("ghost",true)} onClick={()=>startEdit(loc)}>✏️</button>
                   <button style={css.btn("danger",true)} onClick={()=>delLoc(loc.id)} disabled={usedLocIds.has(loc.id)} title={usedLocIds.has(loc.id)?"In use — cannot delete":"Delete"}>🗑</button>
                 </>
@@ -2509,6 +2557,50 @@ function LocForm({ctx,onClose}){
           ))}
         </div>
       )}
+
+      {expandedLocId&&(()=>{
+        const loc=locations.find(l=>l.id===expandedLocId);
+        if(!loc)return null;
+        const defaults=Object.entries(loc.itemDefaults||{});
+        return(
+          <div style={{background:"#FFF8EC",border:"1px solid #F5D76E",borderRadius:8,padding:12,marginBottom:16}}>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:14,fontWeight:700,color:P.deepBrown,marginBottom:4}}>
+              📋 {t("Standard Quantities","நிலையான அளவுகள்")} — {loc.name}
+            </div>
+            <div style={{fontSize:11,color:P.muted,marginBottom:10}}>
+              {t("Define a per-person quantity for items regularly ordered at this location. When adding this recipe to an order for this location, the quantity auto-fills — you just accept or adjust it.","இந்த இடத்திற்கு வழக்கமான பொருட்களுக்கு ஒரு நபருக்கான அளவை வரையறுக்கவும்.")}
+            </div>
+            {defaults.length>0&&(
+              <div style={{marginBottom:10}}>
+                {defaults.map(([recId,qty])=>{
+                  const rec=recipes.find(r=>r.id===+recId);
+                  return(
+                    <div key={recId} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid #F0E6C8"}}>
+                      <span style={{flex:1,fontSize:13}}>{rec?(lang==="en"?rec.name:(rec.nameTamil||rec.name)):"?"}</span>
+                      <span style={{fontSize:12,color:P.saffron,fontWeight:600}}>{qty} {rec?.yieldUnit||""} {t("/ person","/ நபர்")}</span>
+                      <button style={css.btn("danger",true)} onClick={()=>removeItemDefault(loc.id,recId)}>🗑</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div style={{display:"flex",gap:8,alignItems:"flex-end",flexWrap:"wrap"}}>
+              <div style={{flex:1,minWidth:180}}>
+                <label style={css.lbl}>{t("Recipe","சமையல்")}</label>
+                <select style={{...css.sel,width:"100%"}} value={defRecId} onChange={e=>setDefRecId(e.target.value)}>
+                  <option value="">{t("Select recipe...","தேர்வு...")}</option>
+                  {filteredDefRecs.map(r=><option key={r.id} value={r.id}>{lang==="en"?r.name:(r.nameTamil||r.name)}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={css.lbl}>{t("Qty / person","அளவு / நபர்")}</label>
+                <input type="number" step="0.001" min="0" style={{...css.inp,width:100}} value={defQty} onChange={e=>setDefQty(e.target.value)}/>
+              </div>
+              <button style={css.btn("success")} onClick={()=>addItemDefault(loc.id)} disabled={!defRecId||!defQty}>+ {t("Add","சேர்")}</button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Add new location */}
       <div style={{fontSize:11,color:P.muted,fontWeight:600,marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>
@@ -2554,10 +2646,35 @@ function OrderForm({ctx,ord,onClose}){
   const [saveErr,setSaveErr]=useState("");
   const [entryErr,setEntryErr]=useState("");
 
+  // Auto-save: every change is immediately mirrored to global order state (Firestore
+  // writes are already debounced by the app's save queue, so this is safe to call on
+  // every keystroke). Once created, savedId tracks which order in global state is "this one".
+  const [savedId,setSavedId]=useState(ord?.id||null);
+  const computeOrderCost=entries=>+entries.reduce((s,e)=>{
+    const rec=recipes.find(r=>r.id===e.recId);
+    return s+(rec?computeRecipeCost(rec,e.qty/(rec.yield||1),recipes,ingredients):0);
+  },0).toFixed(2);
+  const persist=nextF=>{
+    if(!nextF.name)return; // need a name to identify/create the order — until then, local-only
+    const toSave={...nextF,pax:nextF.pax?+nextF.pax:0,costSnapshot:nextF.isTemplate?undefined:computeOrderCost(nextF.entries)};
+    if(savedId){
+      setOrders(p=>p.map(o=>o.id===savedId?{...toSave,id:savedId}:o));
+    } else {
+      const newId=Date.now();
+      setOrders(p=>[...p,{...toSave,id:newId}]);
+      setSavedId(newId);
+    }
+  };
+  const updateF=updater=>{
+    const next=typeof updater==="function"?updater(f):{...f,...updater};
+    setF(next);
+    persist(next);
+  };
+
   // When session changes — update ALL existing entries to new session
   const changeSession=(sess)=>{
     setDefSession(sess);
-    setF(x=>({...x,entries:x.entries.map(e=>({...e,session:sess}))}));
+    updateF(x=>({...x,entries:x.entries.map(e=>({...e,session:sess}))}));
   };
 
   const filteredRecs=recipes
@@ -2567,7 +2684,7 @@ function OrderForm({ctx,ord,onClose}){
   // Scale all entries from their own locked baseQty/basePax — correct on every keystroke
   const changePax=(newPaxStr)=>{
     const np=+newPaxStr;
-    setF(x=>({
+    updateF(x=>({
       ...x,
       pax:newPaxStr,
       entries:x.entries.map(e=>{
@@ -2581,6 +2698,7 @@ function OrderForm({ctx,ord,onClose}){
     if(!defLocId){setEntryErr(t("Select a location","இடம் தேர்வு செய்யவும்"));return;}
     if(!ne.recId){setEntryErr(t("Select a recipe","சமையல் தேர்வு செய்யவும்"));return;}
     if(!ne.qty||+ne.qty<=0){setEntryErr(t("Enter a valid quantity","அளவு கொடுக்கவும்"));return;}
+    if(!f.name){setEntryErr(t("Enter an order name first","முதலில் ஆர்டர் பெயரை உள்ளிடவும்"));return;}
     setEntryErr("");
     const rec=recipes.find(r=>r.id===+ne.recId);
     const curPax=f.pax&&+f.pax>0?+f.pax:null;
@@ -2590,25 +2708,23 @@ function OrderForm({ctx,ord,onClose}){
       qty:+ne.qty,baseQty:+ne.qty,basePax:curPax,
       yu:rec?.yieldUnit||"kg"
     };
-    setF(x=>({...x,entries:[...x.entries,entry]}));
+    updateF(x=>({...x,entries:[...x.entries,entry]}));
     setNe(n=>({...n,qty:"",recId:""}));
     setRecSearch("");
-  };
-
-  const save=()=>{
-    if(!f.name){setSaveErr(t("Please enter an order name","ஆர்டர் பெயர் கொடுக்கவும்"));return;}
-    if(!f.isTemplate&&!f.date){setSaveErr(t("Please select a date","தேதி தேர்வு செய்யவும்"));return;}
-    setSaveErr("");
-    const toSave={...f,pax:f.pax?+f.pax:0};
-    if(ord)setOrders(p=>p.map(o=>o.id===ord.id?{...toSave,id:ord.id}:o));
-    else setOrders(p=>[...p,{...toSave,id:Date.now()}]);
-    onClose();
   };
 
   const totalCost=f.entries.reduce((s,e)=>{
     const rec=recipes.find(r=>r.id===e.recId);
     return s+(rec?computeRecipeCost(rec,e.qty/(rec.yield||1),recipes,ingredients):0);
   },0);
+
+  const save=()=>{
+    if(!f.name){setSaveErr(t("Please enter an order name","ஆர்டர் பெயர் கொடுக்கவும்"));return;}
+    if(!f.isTemplate&&!f.date){setSaveErr(t("Please select a date","தேதி தேர்வு செய்யவும்"));return;}
+    setSaveErr("");
+    persist(f); // final safety-net write, in case name was only just filled in
+    onClose();
+  };
 
   return(
     <div>
@@ -2621,11 +2737,11 @@ function OrderForm({ctx,ord,onClose}){
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:10,marginBottom:10,alignItems:"end"}}>
         <div>
           <label style={css.lbl}>{t("Order Name","பெயர்")}</label>
-          <input style={css.inp} value={f.name} onChange={e=>setF({...f,name:e.target.value})}/>
+          <input style={css.inp} value={f.name} onChange={e=>updateF({name:e.target.value})}/>
         </div>
         <div>
           <label style={css.lbl}>{t("Date","தேதி")}</label>
-          <input type="date" style={css.inp} disabled={f.isTemplate} value={f.date} onChange={e=>setF({...f,date:e.target.value})}/>
+          <input type="date" style={css.inp} disabled={f.isTemplate} value={f.date} onChange={e=>updateF({date:e.target.value})}/>
         </div>
         <div style={{background:"#EFF6FF",border:"2px solid #3B82F6",borderRadius:8,padding:"8px 12px",minWidth:160}}>
           <label style={{...css.lbl,color:"#1E40AF"}}>👥 {t("No. of Persons","நபர் எண்ணிக்கை")}</label>
@@ -2663,7 +2779,7 @@ function OrderForm({ctx,ord,onClose}){
       </div>
 
       <label style={{display:"flex",alignItems:"center",gap:5,fontSize:12,cursor:"pointer",marginBottom:12}}>
-        <input type="checkbox" checked={f.isTemplate} onChange={e=>setF({...f,isTemplate:e.target.checked,date:e.target.checked?"":f.date})}/>
+        <input type="checkbox" checked={f.isTemplate} onChange={e=>updateF({isTemplate:e.target.checked,date:e.target.checked?"":f.date})}/>
         {t("Save as Template (no date)","மாதிரியாக சேமி")}
       </label>
 
@@ -2673,13 +2789,21 @@ function OrderForm({ctx,ord,onClose}){
 
         <div style={{display:"flex",flexDirection:"column",gap:4,flex:2,minWidth:180}}>
           <input style={{...css.inp,fontSize:11}} placeholder={t("Search recipe...","சமையல் தேடு...")} value={recSearch} onChange={e=>{setRecSearch(e.target.value);setNe(n=>({...n,recId:""}));}}/>
-          <select style={{...css.sel,width:"100%"}} value={ne.recId} onChange={e=>setNe({...ne,recId:e.target.value})}>
+          <select style={{...css.sel,width:"100%"}} value={ne.recId} onChange={e=>{
+            const recId=e.target.value;
+            const loc=locations.find(l=>l.id===+defLocId);
+            const perPerson=loc?.itemDefaults?.[recId];
+            const curPax=f.pax&&+f.pax>0?+f.pax:1;
+            setNe(n=>({...n,recId,qty:perPerson!==undefined?String(+(perPerson*curPax).toFixed(3)):n.qty}));
+          }}>
             <option value="">{filteredRecs.length>0?t("Select from results...","தேர்வு..."):t("No match","பொருந்தவில்லை")}</option>
             {filteredRecs.map(r=><option key={r.id} value={r.id}>{lang==="en"?r.name:r.nameTamil}</option>)}
           </select>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:3,justifyContent:"center"}}>
-          <label style={{...css.lbl,marginBottom:0}}>{t("Qty","அளவு")}{f.pax&&+f.pax>0?<span style={{color:"#3B82F6",marginLeft:4,fontSize:10}}>for {f.pax} persons</span>:""}</label>
+          <label style={{...css.lbl,marginBottom:0}}>{t("Qty","அளவு")}{f.pax&&+f.pax>0?<span style={{color:"#3B82F6",marginLeft:4,fontSize:10}}>for {f.pax} persons</span>:""}
+            {locations.find(l=>l.id===+defLocId)?.itemDefaults?.[ne.recId]!==undefined&&<span style={{color:P.success,marginLeft:4,fontSize:10}}>✓ {t("auto-filled","தானாக நிரப்பப்பட்டது")}</span>}
+          </label>
           <input type="number" min="0" step="0.1" style={{...css.inp,width:80}} value={ne.qty} onChange={e=>setNe({...ne,qty:e.target.value})}/>
         </div>
         <button style={{...css.btn(),alignSelf:"flex-end"}} onClick={addEntry}>+ {t("Add","சேர்")}</button>
@@ -2707,7 +2831,7 @@ function OrderForm({ctx,ord,onClose}){
                   <tr key={i} style={{background:i%2===0?P.white:P.highlight}}>
                     <td style={css.td}>
                       <select style={{...css.sel,fontSize:12,padding:"3px 6px"}} value={e.locId}
-                        onChange={ev=>setF(x=>({...x,entries:x.entries.map((en,j)=>j===i?{...en,locId:+ev.target.value}:en)}))}>
+                        onChange={ev=>updateF(x=>({...x,entries:x.entries.map((en,j)=>j===i?{...en,locId:+ev.target.value}:en)}))}>
                         {locations.map(l=><option key={l.id} value={l.id}>{lang==="en"?l.name:l.nameTamil}</option>)}
                       </select>
                     </td>
@@ -2721,13 +2845,13 @@ function OrderForm({ctx,ord,onClose}){
                             color:scaled?"#2563EB":"inherit",
                             border:scaled?"2px solid #93C5FD":"1px solid #DCC88A"}}
                           value={e.qty}
-                          onChange={ev=>setF(x=>({...x,entries:x.entries.map((en,j)=>j===i?{...en,qty:+ev.target.value,baseQty:+ev.target.value,basePax:+f.pax||en.basePax}:en)}))}/>
+                          onChange={ev=>updateF(x=>({...x,entries:x.entries.map((en,j)=>j===i?{...en,qty:+ev.target.value,baseQty:+ev.target.value,basePax:+f.pax||en.basePax}:en)}))}/>
                         <span style={{fontSize:11,color:P.muted}}>{e.yu}</span>
                         {scaled&&<span style={{fontSize:10,color:"#6B7280"}}>({e.baseQty}@{e.basePax})</span>}
                       </div>
                     </td>
                     <td style={css.td}>{lineCost>0?<strong style={{color:P.success}}>₹{lineCost.toFixed(0)}</strong>:<span style={{color:"#CCC"}}>—</span>}</td>
-                    <td style={css.td}><button style={css.btn("danger",true)} onClick={()=>setF(x=>({...x,entries:x.entries.filter((_,j)=>j!==i)}))}>✕</button></td>
+                    <td style={css.td}><button style={css.btn("danger",true)} onClick={()=>updateF(x=>({...x,entries:x.entries.filter((_,j)=>j!==i)}))}>✕</button></td>
                   </tr>
                 );
               })}
@@ -2743,9 +2867,9 @@ function OrderForm({ctx,ord,onClose}){
       )}
 
       {saveErr&&<div style={{color:P.danger,fontSize:11,marginBottom:8,padding:"4px 8px",background:"#FEE2E2",borderRadius:5,textAlign:"right"}}>⚠ {saveErr}</div>}
+      {savedId&&<div style={{fontSize:11,color:P.success,marginBottom:8,textAlign:"right"}}>✓ {t("Saved automatically","தானாக சேமிக்கப்பட்டது")}</div>}
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-        <button style={css.btn("ghost")} onClick={onClose}>{t("Cancel","ரத்து")}</button>
-        <button style={css.btn()} onClick={save}>💾 {t("Save Order","சேமி")}</button>
+        <button style={css.btn()} onClick={save}>✓ {t("Done","முடிந்தது")}</button>
       </div>
     </div>
   );
@@ -6097,6 +6221,29 @@ function InvPage({ctx}){
     return ps.reduce((s,p)=>s+p.cpu*p.qty,0)/totalQty;
   };
 
+  const [normSyncResult,setNormSyncResult]=useState(null); // last sync's results, for display after the fact
+
+  // Compare each ingredient's current norm cost against its most recent purchase price,
+  // and apply immediately. Recipe/report costs read normCost live, so they update
+  // automatically everywhere the moment this runs — orders already placed keep their
+  // own frozen cost snapshot and are not touched.
+  const syncNormCosts=()=>{
+    const changes=ingredients.map(ing=>{
+      const latest=latestCpu(ing.id);
+      if(latest===null||!latest)return null;
+      const old=ing.normCost||0;
+      if(Math.abs(latest-old)<0.001)return null; // already in sync
+      return{ing,oldCost:old,newCost:latest,pctChange:old?((latest-old)/old*100):null};
+    }).filter(Boolean).sort((a,b)=>Math.abs(b.pctChange||0)-Math.abs(a.pctChange||0));
+
+    if(!changes.length){setNormSyncResult([]);return;}
+    if(!confirm(t("Update normative cost for","")+" "+changes.length+" "+t("ingredient(s) to match their latest purchase price? This updates recipe costing immediately; existing orders already placed are not affected.","பொருட்களின் நிலையான விலையை புதுப்பிக்கவா? ஏற்கனவே உள்ள ஆர்டர்கள் பாதிக்கப்படாது.")))return;
+
+    const updates=new Map(changes.map(c=>[c.ing.id,c.newCost]));
+    setIngredients(p=>p.map(i=>updates.has(i.id)?{...i,normCost:updates.get(i.id)}:i));
+    setNormSyncResult(changes);
+  };
+
   const totalValue=ingredients.reduce((sum,ing)=>{
     const {bal}=getBal(ing.id);
     const avg=avgCpu(ing.id)||0;
@@ -6396,6 +6543,50 @@ function InvPage({ctx}){
       {/* ── COST ALERTS ── */}
       {tab==="alerts"&&(
         <div>
+          <div style={{...css.card,background:"#EEF2FF",border:"1px solid #A5B4FC",marginBottom:14}}>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:P.deepBrown,marginBottom:4}}>
+              🔄 {t("Sync Norm Costs to Latest Prices","சமீபத்திய விலைக்கு நிலையான விலையை புதுப்பி")}
+            </div>
+            <div style={{fontSize:11,color:P.muted,marginBottom:10}}>
+              {t("Prices drift over time — run this periodically (e.g. monthly) to update each ingredient's normative cost to its most recent purchase price. Recipe costing updates immediately everywhere since it's always calculated live. Orders already placed keep the cost they were saved with and are not changed.","விலைகள் காலப்போக்கில் மாறும் — சமையல் செலவு உடனே புதுப்பிக்கப்படும். ஏற்கனவே உள்ள ஆர்டர்கள் பாதிக்கப்படாது.")}
+            </div>
+            <button style={css.btn("primary")} onClick={syncNormCosts}>🔄 {t("Sync Norm Costs Now","இப்போது புதுப்பிக்கவும்")}</button>
+
+            {normSyncResult!==null&&(
+              normSyncResult.length===0?(
+                <div style={{fontSize:12,color:P.success,fontWeight:600,marginTop:10}}>✅ {t("All normative costs already matched latest purchase prices — nothing to update.","அனைத்தும் ஏற்கனவே பொருந்துகிறது — புதுப்பிக்க எதுவும் இல்லை.")}</div>
+              ):(
+                <>
+                  <div style={{fontSize:12,color:"#166534",fontWeight:600,marginTop:10,marginBottom:8}}>✓ {t("Updated","புதுப்பிக்கப்பட்டது")} {normSyncResult.length} {t("ingredient(s):","பொருட்கள்:")}</div>
+                  <div style={{...css.card,padding:0,overflow:"auto",maxHeight:320}}>
+                    <table style={css.table}>
+                      <thead><tr>
+                        <th style={css.th}>{t("Ingredient","பொருள்")}</th>
+                        <th style={{...css.th,textAlign:"right"}}>{t("Old Norm","பழையது")}</th>
+                        <th style={{...css.th,textAlign:"right"}}>{t("New Norm","புதியது")}</th>
+                        <th style={{...css.th,textAlign:"right"}}>{t("Change","மாற்றம்")}</th>
+                      </tr></thead>
+                      <tbody>
+                        {normSyncResult.map((c,i)=>(
+                          <tr key={c.ing.id} style={{background:i%2===0?P.white:P.highlight}}>
+                            <td style={css.td}><strong>{n(c.ing)}</strong></td>
+                            <td style={{...css.td,textAlign:"right",color:P.muted}}>₹{c.oldCost.toFixed(2)}</td>
+                            <td style={{...css.td,textAlign:"right"}}><strong style={{color:P.success}}>₹{c.newCost.toFixed(2)}</strong></td>
+                            <td style={{...css.td,textAlign:"right"}}>
+                              <span style={{...css.badge(c.newCost>c.oldCost?P.danger:P.success),fontSize:11,fontWeight:700}}>
+                                {c.pctChange===null?"new":(c.pctChange>0?"+":"")+c.pctChange.toFixed(1)+"%"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )
+            )}
+          </div>
+
           <div style={{background:"#FFF3CD",border:"1px solid #F59E0B",borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#7C4A00"}}>
             📐 <strong>{t("Normative Cost Alert","நிலையான விலை எச்சரிக்கை")}</strong> — {t("Purchases where the actual price paid deviates more than ±10% from the normative cost are flagged below. Review normative costs in Ingredients if market prices have permanently shifted.","நிலையான விலையிலிருந்து ±10% மேல் வேறுபட்ட கொள்முதல்கள் கீழே காட்டப்படுகின்றன.")}
           </div>
