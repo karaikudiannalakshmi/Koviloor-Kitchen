@@ -6326,6 +6326,11 @@ function InvPage({ctx}){
   const [issuePageNum,setIssuePageNum]=useState(1);
   const [issuePageSize,setIssuePageSize]=useState(20);
   useEffect(()=>{setIssuePageNum(1);},[issueDateQ,issuePageSize]);
+  const [purchQ,setPurchQ]=useState("");
+  const [purchDateQ,setPurchDateQ]=useState("");
+  const [purchPageNum,setPurchPageNum]=useState(1);
+  const [purchPageSize,setPurchPageSize]=useState(20);
+  useEffect(()=>{setPurchPageNum(1);},[purchQ,purchDateQ,purchPageSize]);
   const openStockRef=useRef();
   const [openStockDate,setOpenStockDate]=useState(TODAY);
   const [openStockMsg,setOpenStockMsg]=useState("");
@@ -6779,50 +6784,106 @@ function InvPage({ctx}){
       )}
 
       {/* ── PURCHASES ── */}
-      {tab==="purchases"&&(
-        <div style={{...css.card,padding:0,overflow:"auto"}}>
-          <table style={css.table}>
-            <thead><tr>
-              <th style={css.th}>{t("Date","தேதி")}</th>
-              <th style={css.th}>{t("Ingredient","பொருள்")}</th>
-              <th style={css.th}>{t("Qty","அளவு")}</th>
-              <th style={css.th}>{t("Paid ₹/unit","செலுத்திய விலை")}</th>
-              <th style={css.th}>{t("Norm ₹/unit","நிலையான விலை")}</th>
-              <th style={css.th}>{t("Deviation","மாறுபாடு")}</th>
-              <th style={css.th}>{t("Total Cost","மொத்த செலவு")}</th>
-              <th style={css.th}>{t("Supplier","சப்ளையர்")}</th>
-              <th style={css.th}></th>
-            </tr></thead>
-            <tbody>
-              {inventory.purchases.length===0&&<tr><td colSpan={9} style={{...css.td,textAlign:"center",color:P.muted}}>{t("No purchases yet.","கொள்முதல் இல்லை.")}</td></tr>}
-              {[...inventory.purchases].sort((a,b)=>b.date.localeCompare(a.date)).map((p,i)=>{
-                const ing=ingredients.find(x=>x.id===p.iid);
-                const norm=ing?.normCost;
-                const dev=norm?(p.cpu-norm)/norm*100:null;
-                const devColor=dev===null?P.muted:Math.abs(dev)>10?P.danger:Math.abs(dev)>5?P.saffron:P.success;
-                return(
-                  <tr key={p.id} style={{background:i%2===0?P.white:P.highlight}}>
-                    <td style={css.td}>{p.date}</td>
-                    <td style={css.td}>{ing?n(ing):"?"}</td>
-                    <td style={css.td}>{p.qty} {p.unit}</td>
-                    <td style={css.td}><strong>₹{p.cpu}</strong></td>
-                    <td style={css.td}>{norm?<span style={{color:P.purple}}>₹{norm}</span>:<span style={{color:"#CCC"}}>—</span>}</td>
-                    <td style={css.td}>{dev!==null?<span style={{...css.badge(devColor),fontWeight:700}}>{dev>0?"+":""}{dev.toFixed(1)}%</span>:<span style={{color:"#CCC"}}>—</span>}</td>
-                    <td style={css.td}><strong>₹{(p.qty*p.cpu).toFixed(0)}</strong></td>
-                    <td style={css.td}>
-                      {p.supplier}
-                      {p.source==="ledger_import"&&<span style={{...css.badge(P.info),fontSize:9,marginLeft:6}}>📥 {t("Ledger","லெட்ஜர்")}</span>}
-                      {p.source==="opening_stock"&&<span style={{...css.badge(P.purple),fontSize:9,marginLeft:6}}>📦 {t("Opening","தொடக்க")}</span>}
-                      {p.source==="stock_adjustment"&&<span style={{...css.badge(P.danger),fontSize:9,marginLeft:6}}>⚠️ {t("Adj","சரி")}</span>}
-                    </td>
-                    <td style={css.td}><button style={css.btn("danger",true)} onClick={()=>setInventory(pr=>({...pr,purchases:pr.purchases.filter(x=>x.id!==p.id)}))}>🗑</button></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      {tab==="purchases"&&(()=>{
+        const sortedPurch=[...inventory.purchases].sort((a,b)=>b.date.localeCompare(a.date));
+        const dq=purchDateQ.replace(/-/g,"");
+        const qq=purchQ.trim().toLowerCase();
+        const filteredPurch=sortedPurch.filter(p=>{
+          if(dq&&!p.date.replace(/-/g,"").includes(dq))return false;
+          if(qq){
+            const ing=ingredients.find(x=>x.id===p.iid);
+            const nameMatch=ing&&(ing.name.toLowerCase().includes(qq)||(ing.nameTamil||"").toLowerCase().includes(qq));
+            const supplierMatch=(p.supplier||"").toLowerCase().includes(qq);
+            if(!nameMatch&&!supplierMatch)return false;
+          }
+          return true;
+        });
+        const purchTotalPages=Math.max(1,Math.ceil(filteredPurch.length/purchPageSize));
+        const pagedPurch=filteredPurch.slice((purchPageNum-1)*purchPageSize,purchPageNum*purchPageSize);
+        return(
+        <div>
+          <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap",marginBottom:10}}>
+            <div>
+              <label style={css.lbl}>{t("Search Ingredient / Supplier","பொருள் / சப்ளையர் தேடு")}</label>
+              <input style={{...css.inp,width:220}} placeholder={t("e.g. Rice, Shahul...","எ.கா. அரிசி...")} value={purchQ} onChange={e=>setPurchQ(e.target.value)}/>
+            </div>
+            <div>
+              <label style={css.lbl}>{t("Search Date","தேதி தேடு")}</label>
+              <input type="date" style={{...css.inp,width:160}} value={purchDateQ} onChange={e=>setPurchDateQ(e.target.value)}/>
+            </div>
+            {(purchQ||purchDateQ)&&<button style={css.btn("ghost",true)} onClick={()=>{setPurchQ("");setPurchDateQ("");}}>✕ {t("Clear","அழி")}</button>}
+          </div>
+          <div style={{...css.card,padding:0,overflow:"auto"}}>
+            <table style={css.table}>
+              <thead><tr>
+                <th style={css.th}>{t("Date","தேதி")}</th>
+                <th style={css.th}>{t("Ingredient","பொருள்")}</th>
+                <th style={css.th}>{t("Qty","அளவு")}</th>
+                <th style={css.th}>{t("Paid ₹/unit","செலுத்திய விலை")}</th>
+                <th style={css.th}>{t("Norm ₹/unit","நிலையான விலை")}</th>
+                <th style={css.th}>{t("Deviation","மாறுபாடு")}</th>
+                <th style={css.th}>{t("Total Cost","மொத்த செலவு")}</th>
+                <th style={css.th}>{t("Supplier","சப்ளையர்")}</th>
+                <th style={css.th}></th>
+              </tr></thead>
+              <tbody>
+                {filteredPurch.length===0&&<tr><td colSpan={9} style={{...css.td,textAlign:"center",color:P.muted}}>{purchQ||purchDateQ?t("No purchases match this search.","பொருந்தும் கொள்முதல் இல்லை."):t("No purchases yet.","கொள்முதல் இல்லை.")}</td></tr>}
+                {pagedPurch.map((p,i)=>{
+                  const ing=ingredients.find(x=>x.id===p.iid);
+                  const norm=ing?.normCost;
+                  const dev=norm?(p.cpu-norm)/norm*100:null;
+                  const devColor=dev===null?P.muted:Math.abs(dev)>10?P.danger:Math.abs(dev)>5?P.saffron:P.success;
+                  return(
+                    <tr key={p.id} style={{background:i%2===0?P.white:P.highlight}}>
+                      <td style={css.td}>{p.date}</td>
+                      <td style={css.td}>{ing?n(ing):"?"}</td>
+                      <td style={css.td}>
+                        <div style={{display:"flex",alignItems:"center",gap:4}}>
+                          <input type="number" step="0.01" style={{...css.inp,width:70,padding:"3px 6px"}} value={p.qty}
+                            onChange={e=>setInventory(pr=>({...pr,purchases:pr.purchases.map(x=>x.id===p.id?{...x,qty:+e.target.value}:x)}))}/>
+                          <span style={{fontSize:11,color:P.muted}}>{p.unit}</span>
+                        </div>
+                      </td>
+                      <td style={css.td}>
+                        <input type="number" step="0.01" style={{...css.inp,width:70,padding:"3px 6px",fontWeight:700}} value={p.cpu}
+                          onChange={e=>setInventory(pr=>({...pr,purchases:pr.purchases.map(x=>x.id===p.id?{...x,cpu:+e.target.value}:x)}))}/>
+                      </td>
+                      <td style={css.td}>{norm?<span style={{color:P.purple}}>₹{norm}</span>:<span style={{color:"#CCC"}}>—</span>}</td>
+                      <td style={css.td}>{dev!==null?<span style={{...css.badge(devColor),fontWeight:700}}>{dev>0?"+":""}{dev.toFixed(1)}%</span>:<span style={{color:"#CCC"}}>—</span>}</td>
+                      <td style={css.td}><strong>₹{(p.qty*p.cpu).toFixed(0)}</strong></td>
+                      <td style={css.td}>
+                        {p.supplier}
+                        {p.source==="ledger_import"&&<span style={{...css.badge(P.info),fontSize:9,marginLeft:6}}>📥 {t("Ledger","லெட்ஜர்")}</span>}
+                        {p.source==="opening_stock"&&<span style={{...css.badge(P.purple),fontSize:9,marginLeft:6}}>📦 {t("Opening","தொடக்க")}</span>}
+                        {p.source==="stock_adjustment"&&<span style={{...css.badge(P.danger),fontSize:9,marginLeft:6}}>⚠️ {t("Adj","சரி")}</span>}
+                      </td>
+                      <td style={css.td}><button style={css.btn("danger",true)} onClick={()=>setInventory(pr=>({...pr,purchases:pr.purchases.filter(x=>x.id!==p.id)}))}>🗑</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8,flexWrap:"wrap",gap:10}}>
+            <div style={{fontSize:11,color:P.muted}}>
+              {filteredPurch.length} {t("purchase(s)","கொள்முதல்கள்")} — {t("showing","காட்டுகிறது")} {filteredPurch.length===0?0:(purchPageNum-1)*purchPageSize+1}–{Math.min(purchPageNum*purchPageSize,filteredPurch.length)}
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              <select style={{...css.sel,fontSize:11,padding:"4px 8px"}} value={purchPageSize} onChange={e=>setPurchPageSize(+e.target.value)}>
+                <option value={20}>20 / {t("page","பக்கம்")}</option>
+                <option value={50}>50 / {t("page","பக்கம்")}</option>
+                <option value={100}>100 / {t("page","பக்கம்")}</option>
+              </select>
+              <button style={css.btn("ghost",true)} disabled={purchPageNum<=1} onClick={()=>setPurchPageNum(1)}>{"«"}</button>
+              <button style={css.btn("ghost",true)} disabled={purchPageNum<=1} onClick={()=>setPurchPageNum(p=>p-1)}>{"‹"}</button>
+              <span style={{fontSize:12,color:P.deepBrown,fontWeight:600}}>{purchPageNum} / {purchTotalPages}</span>
+              <button style={css.btn("ghost",true)} disabled={purchPageNum>=purchTotalPages} onClick={()=>setPurchPageNum(p=>p+1)}>{"›"}</button>
+              <button style={css.btn("ghost",true)} disabled={purchPageNum>=purchTotalPages} onClick={()=>setPurchPageNum(purchTotalPages)}>{"»"}</button>
+            </div>
+          </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ── ISSUES ── */}
       {tab==="issues"&&(()=>{
