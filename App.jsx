@@ -2514,6 +2514,18 @@ function LocForm({ctx,onClose}){
   const [defPrefix,setDefPrefix]=useState("");
   const [defQty,setDefQty]=useState("");
   const [defUnit,setDefUnit]=useState("");
+
+  // Every prefix already used across all locations — offered as autocomplete suggestions
+  // so the same dish-type prefix is always spelled/cased the same way everywhere.
+  const allKnownPrefixes=useMemo(()=>{
+    const seen=new Map(); // lowercase -> original casing (first one wins)
+    locations.forEach(l=>safeItemDefaults(l).forEach(r=>{
+      const key=r.prefix.toLowerCase();
+      if(!seen.has(key))seen.set(key,r.prefix);
+    }));
+    return[...seen.values()].sort((a,b)=>a.localeCompare(b));
+  },[locations]);
+
   const addItemDefault=locId=>{
     if(!defPrefix.trim()||!defQty)return;
     const rule={prefix:defPrefix.trim(),qty:+defQty,unit:defUnit.trim()};
@@ -2617,13 +2629,16 @@ function LocForm({ctx,onClose}){
             <div style={{display:"flex",gap:8,alignItems:"flex-end",flexWrap:"wrap"}}>
               <div>
                 <label style={css.lbl}>{t("Name Prefix","பெயர் முன்னொட்டு")}</label>
-                <input style={{...css.inp,width:110}} placeholder="KK, Rice..." value={defPrefix} onChange={e=>{
+                <input style={{...css.inp,width:110}} placeholder="KK, Rice..." value={defPrefix} list="loc-prefix-suggestions" onChange={e=>{
                   const val=e.target.value;
                   setDefPrefix(val);
                   // Auto-fill unit from what the matching recipes already use — no need to pick it manually
                   const matches=recipes.filter(r=>!r.isSubRecipe&&r.name.toLowerCase().startsWith(val.trim().toLowerCase()));
                   if(val.trim()&&matches.length&&matches[0].yieldUnit)setDefUnit(matches[0].yieldUnit);
                 }}/>
+                <datalist id="loc-prefix-suggestions">
+                  {allKnownPrefixes.map(p=><option key={p} value={p}/>)}
+                </datalist>
               </div>
               <div>
                 <label style={css.lbl}>{t("Qty / person","அளவு / நபர்")}</label>
