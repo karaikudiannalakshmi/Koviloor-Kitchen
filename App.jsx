@@ -4046,10 +4046,15 @@ function RepCol({ctx}){
   const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
   const [dt,setDt]=useState(TODAY);
   const [sessF,setSessF]=useState("All");
+  const [locFilters,setLocFilters]=useState([]); // empty = all locations
+  const toggleLocFilter=id=>setLocFilters(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
 
   const allEntries=orders.filter(o=>!o.isTemplate&&o.date===dt).flatMap(o=>o.entries.map(e=>({...e,_order:o})));
-  const entries=sessF==="All"?allEntries:allEntries.filter(e=>e.session===sessF);
+  const entries=(sessF==="All"?allEntries:allEntries.filter(e=>e.session===sessF))
+    .filter(e=>!locFilters.length||locFilters.includes(e.locId));
   const activeSessions=["All",...SESSIONS.filter(s=>allEntries.some(e=>e.session===s))];
+  const cols=locations.filter(l=>!locFilters.length||locFilters.includes(l.id));
+
   const rows={};
   entries.forEach(e=>{
     const rec=recipes.find(r=>r.id===e.recId); if(!rec)return;
@@ -4059,30 +4064,56 @@ function RepCol({ctx}){
   });
   const sorted=Object.values(rows).sort((a,b)=>SESSIONS.indexOf(a.session)-SESSIONS.indexOf(b.session));
 
+  // Group into per-session blocks — this is the structure of the daily columnar sheet
+  const blocks=SESSIONS
+    .map(s=>({session:s,items:sorted.filter(r=>r.session===s)}))
+    .filter(b=>b.items.length>0);
+
   const doPrint=()=>{
-    const locHeaders=locations.map(l=>`<th>${rLang==="en"?l.name:l.nameTamil}</th>`).join("");
-    const tableRows=sorted.map(row=>{
-      const total=Object.values(row.locs).reduce((s,v)=>s+v,0);
-      const locCells=locations.map(l=>{
-        const v=row.locs[l.id];
-        return "<td style='text-align:center'>"+(v?"<strong>"+v+" "+row.rec.yieldUnit+"</strong>":"—")+"</td>";
+    const locHeaders=cols.map(l=>`<th>${n(l)}</th>`).join("");
+    const blockHtml=blocks.map(b=>{
+      const tableRows=b.items.map(row=>{
+        const total=Object.values(row.locs).reduce((s,v)=>s+v,0);
+        const locCells=cols.map(l=>{
+          const v=row.locs[l.id];
+          return "<td style='text-align:center'>"+(v?"<strong>"+v+"</strong>":"—")+"</td>";
+        }).join("");
+        return "<tr><td><strong>"+n(row.rec)+"</strong></td>"+locCells+"<td style='text-align:center;background:#fffbe8'><strong>"+(+total.toFixed(3))+" "+row.rec.yieldUnit+"</strong></td></tr>";
       }).join("");
-      return "<tr><td>"+row.session+"</td><td><strong>"+(rLang==="en"?row.rec.name:row.rec.nameTamil)+"</strong></td>"+locCells+"<td style='text-align:center;background:#fffbe8'><strong>"+total.toFixed(1)+" "+row.rec.yieldUnit+"</strong></td></tr>";
+      return "<h3 style='margin:16px 0 6px'>"+b.session+"</h3><table><thead><tr><th>"+t("Item","உணவு")+"</th>"+locHeaders+"<th>"+t("Total","மொத்தம்")+"</th></tr></thead><tbody>"+tableRows+"</tbody></table>";
     }).join("");
-    const thead2="<thead><tr><th>"+t("Session","அமர்வு")+"</th><th>"+t("Dish","உணவு")+"</th>"+locHeaders+"<th>"+t("Total","மொத்தம்")+"</th></tr></thead>";
-    const sessLabel=sessF==="All"?"All Sessions":sessF;
-    printHTML("Location Columnar — "+dt+" ("+sessLabel+")","<p class='meta'>Date: "+dt+" | Session: "+sessLabel+"</p><table>"+thead2+"<tbody>"+tableRows+"</tbody></table>");
+    printHTML("Location Columnar — "+dt,"<p class='meta'>Date: "+dt+"</p>"+blockHtml);
   };
 
+  // The free Excel library used elsewhere in this app (SheetJS Community Edition) cannot
+  // actually write cell borders/fills to a true .xlsx file — that's a paid-tier-only
+  // feature, confirmed by testing it directly. Excel *can* open an HTML table saved with
+  // a .xls extension though, and HTML does support real borders — so that's what this
+  // export builds instead, specifically so the sheet is genuinely readable with borders.
   const doExport=()=>{
-    const data=sorted.map(row=>{
-      const total=Object.values(row.locs).reduce((s,v)=>s+v,0);
-      const obj={Session:row.session,[t("Dish","உணவு")]:rLang==="en"?row.rec.name:row.rec.nameTamil};
-      locations.forEach(l=>{obj[rLang==="en"?l.name:l.nameTamil]=row.locs[l.id]||0;});
-      obj.Total=total; obj.Unit=row.rec.yieldUnit;
-      return obj;
-    });
-    exportXlsxSheets(`columnar_${dt}.xlsx`,[{name:"Location Columnar",data}]);
+    const style="<style>"+
+      "table{border-collapse:collapse;font-family:Arial,sans-serif;margin-bottom:10px;}"+
+      "th,td{border:1px solid #555;padding:6px 10px;text-align:center;}"+
+      "th{background:#2d1a0e;color:#fff;}"+
+      "td:first-child{text-align:left;font-weight:bold;}"+
+      "h2{font-family:Arial,sans-serif;color:#5C2A0A;margin:16px 0 6px;}"+
+      "</style>";
+    const body=blocks.map(b=>{
+      const headerRow="<tr><th>"+t("Item","உணவு")+"</th>"+cols.map(l=>"<th>"+n(l)+"</th>").join("")+"<th>"+t("Total","மொத்தம்")+"</th><th>"+t("Unit","அலகு")+"</th></tr>";
+      const itemRows=b.items.map(row=>{
+        const total=Object.values(row.locs).reduce((s,v)=>s+v,0);
+        const cells=cols.map(l=>"<td>"+(row.locs[l.id]?+row.locs[l.id].toFixed(3):"")+"</td>").join("");
+        return "<tr><td>"+n(row.rec)+"</td>"+cells+"<td>"+(+total.toFixed(3))+"</td><td>"+row.rec.yieldUnit+"</td></tr>";
+      }).join("");
+      return "<h2>"+b.session+"</h2><table>"+headerRow+itemRows+"</table>";
+    }).join("");
+    const html="<html><head><meta charset='UTF-8'>"+style+"</head><body>"+body+"</body></html>";
+    const blob=new Blob([html],{type:"application/vnd.ms-excel"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url; a.download="columnar_"+dt+".xls";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   return(
@@ -4095,29 +4126,51 @@ function RepCol({ctx}){
           </select>
         </div>
       </ReportBar>
-      {sorted.length===0?<div style={{color:P.muted,textAlign:"center",padding:24}}>{t("No orders for this date.","இந்த தேதிக்கு ஆர்டர் இல்லை.")}</div>:(
-        <div style={{...css.card,padding:0,overflow:"auto"}}>
-          <table style={css.table}>
-            <thead><tr>
-              {sessF==="All"&&<th style={css.th}>{t("Session","அமர்வு")}</th>}
-              <th style={css.th}>{t("Dish","உணவு")}</th>
-              {locations.map(l=><th key={l.id} style={css.th}>{n(l)}</th>)}
-              <th style={{...css.th,background:"#2d1a0e"}}>{t("Total","மொத்தம்")}</th>
-            </tr></thead>
-            <tbody>{sorted.map((row,i)=>{
-              const total=Object.values(row.locs).reduce((s,v)=>s+v,0);
-              return(
-                <tr key={i} style={{background:i%2===0?P.white:P.highlight}}>
-                  {sessF==="All"&&<td style={css.td}><span style={css.badge(SCOLOR[row.session]||P.muted)}>{row.session}</span></td>}
-                  <td style={css.td}><strong>{n(row.rec)}</strong></td>
-                  {locations.map(l=><td key={l.id} style={{...css.td,textAlign:"center"}}>{row.locs[l.id]?<strong>{row.locs[l.id]} {row.rec.yieldUnit}</strong>:<span style={{color:"#DDD"}}>—</span>}</td>)}
-                  <td style={{...css.td,textAlign:"center",background:"#FEF0D4"}}><strong style={{color:P.saffron}}>{total.toFixed(1)} {row.rec.yieldUnit}</strong></td>
-                </tr>
-              );
-            })}</tbody>
-          </table>
+
+      {locations.length>0&&(
+        <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+          <span style={{fontSize:11,color:P.muted,marginRight:2}}>{t("Locations:","இடங்கள்:")}</span>
+          <button style={css.btn(locFilters.length===0?"primary":"ghost",true)} onClick={()=>setLocFilters([])}>{t("All","அனைத்தும்")}</button>
+          {locations.map(l=>(
+            <label key={l.id} style={{display:"flex",alignItems:"center",gap:4,fontSize:12,cursor:"pointer",
+              background:locFilters.includes(l.id)?P.saffron+"22":"transparent",
+              border:"1px solid "+(locFilters.includes(l.id)?P.saffron:"#DCC88A"),borderRadius:7,padding:"4px 9px"}}>
+              <input type="checkbox" checked={locFilters.includes(l.id)} onChange={()=>toggleLocFilter(l.id)}/>
+              {n(l)}
+            </label>
+          ))}
         </div>
       )}
+
+      {blocks.length===0?(
+        <div style={{color:P.muted,textAlign:"center",padding:24}}>{t("No orders for this date.","இந்த தேதிக்கு ஆர்டர் இல்லை.")}</div>
+      ):blocks.map(b=>(
+        <div key={b.session} style={{marginBottom:20}}>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:P.deepBrown,marginBottom:8,
+            display:"flex",alignItems:"center",gap:8}}>
+            <span style={css.badge(SCOLOR[b.session]||P.muted)}>{b.session}</span>
+          </div>
+          <div style={{...css.card,padding:0,overflow:"auto"}}>
+            <table style={css.table}>
+              <thead><tr>
+                <th style={css.th}>{t("Item","உணவு")}</th>
+                {cols.map(l=><th key={l.id} style={css.th}>{n(l)}</th>)}
+                <th style={{...css.th,background:"#2d1a0e"}}>{t("Total","மொத்தம்")}</th>
+              </tr></thead>
+              <tbody>{b.items.map((row,i)=>{
+                const total=Object.values(row.locs).reduce((s,v)=>s+v,0);
+                return(
+                  <tr key={i} style={{background:i%2===0?P.white:P.highlight}}>
+                    <td style={css.td}><strong>{n(row.rec)}</strong></td>
+                    {cols.map(l=><td key={l.id} style={{...css.td,textAlign:"center"}}>{row.locs[l.id]?<strong>{+row.locs[l.id].toFixed(3)} {row.rec.yieldUnit}</strong>:<span style={{color:"#DDD"}}>—</span>}</td>)}
+                    <td style={{...css.td,textAlign:"center",background:"#FEF0D4"}}><strong style={{color:P.saffron}}>{+total.toFixed(3)} {row.rec.yieldUnit}</strong></td>
+                  </tr>
+                );
+              })}</tbody>
+            </table>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
