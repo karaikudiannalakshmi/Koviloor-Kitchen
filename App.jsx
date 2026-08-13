@@ -614,6 +614,7 @@ function App(){
       {id:"occ_templates",en:"Templates",ta:"மாதிரிகள்"},
       {id:"occ_orders",en:"Orders",ta:"ஆர்டர்கள்"},
       {id:"occ_purchase",en:"Purchase Planning",ta:"கொள்முதல் திட்டம்"},
+      {id:"occ_calendar",en:"Occasions Calendar",ta:"நிகழ்வு காலண்டர்"},
     ]},
   ];
   const flat=NAV.flatMap(n=>n.children?[n,...n.children]:[n]);
@@ -681,6 +682,7 @@ function App(){
           {page==="occ_templates"&&<OccTemplatesPage ctx={ctx}/>}
           {page==="occ_orders"&&<OccOrdersPage ctx={ctx}/>}
           {page==="occ_purchase"&&<OccPurchasePage ctx={ctx}/>}
+          {page==="occ_calendar"&&<OccCalendarPage ctx={ctx}/>}
         </div>
       </main>
 
@@ -6345,6 +6347,122 @@ function OccPurchasePage({ctx}){
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// TEMPLE OCCASIONS: MONTHLY CALENDAR OF ALL EVENTS
+// ════════════════════════════════════════════════════════════════════
+function OccCalendarPage({ctx}){
+  const {occOrders,lang:gLang}=ctx;
+  const [lang,setLang]=useState(gLang);
+  const t=(en,ta)=>lang==="en"?en:ta;
+  const [year,setYear]=useState(+TODAY.slice(0,4));
+
+  const MONTH_NAMES={
+    en:["January","February","March","April","May","June","July","August","September","October","November","December"],
+    ta:["ஜனவரி","பிப்ரவரி","மார்ச்","ஏப்ரல்","மே","ஜூன்","ஜூலை","ஆகஸ்ட்","செப்டம்பர்","அக்டோபர்","நவம்பர்","டிசம்பர்"],
+  };
+  const DAY_NAMES={
+    en:["Sun","Mon","Tue","Wed","Thu","Fri","Sat"],
+    ta:["ஞாயிறு","திங்கள்","செவ்வாய்","புதன்","வியாழன்","வெள்ளி","சனி"],
+  };
+
+  // Distinct colors per occasion template so the same occasion is visually consistent across months
+  const PALETTE=["#E8821A","#0EA5E9","#8B5CF6","#10B981","#EF4444","#F59E0B","#EC4899","#14B8A6","#6366F1","#84CC16"];
+  const templateNames=[...new Set(occOrders.map(o=>o.templateName))].sort();
+  const colorFor=name=>PALETTE[templateNames.indexOf(name)%PALETTE.length];
+
+  const yearOrders=occOrders.filter(o=>o.date.slice(0,4)===String(year)).sort((a,b)=>a.date.localeCompare(b.date));
+
+  const months=Array.from({length:12},(_,m)=>{
+    const items=yearOrders.filter(o=>+o.date.slice(5,7)-1===m);
+    return{monthIdx:m,items};
+  }).filter(mo=>mo.items.length>0||true); // keep all 12 for a full-year overview
+
+  const hasData=yearOrders.length>0;
+
+  const doExport=()=>{
+    const data=[];
+    months.forEach(mo=>{
+      if(!mo.items.length)return;
+      data.push({[t("Month","மாதம்")]:MONTH_NAMES[lang][mo.monthIdx],[t("Date","தேதி")]:"",[t("Day","நாள்")]:"",[t("Occasion","நிகழ்வு")]:"",[t("Items","பொருட்கள்")]:""});
+      mo.items.forEach(o=>{
+        const d=new Date(o.date);
+        data.push({
+          [t("Month","மாதம்")]:"",
+          [t("Date","தேதி")]:o.date,
+          [t("Day","நாள்")]:DAY_NAMES[lang][d.getDay()],
+          [t("Occasion","நிகழ்வு")]:lang==="en"?o.templateName:(o.templateNameTamil||o.templateName),
+          [t("Items","பொருட்கள்")]:(o.items||[]).length,
+        });
+      });
+    });
+    exportXlsxSheets("occasions_calendar_"+year+".xlsx",[{name:"Occasions "+year,data}]);
+  };
+
+  const doPrint=()=>{
+    const blocks=months.filter(mo=>mo.items.length).map(mo=>{
+      const rows=mo.items.map(o=>{
+        const d=new Date(o.date);
+        const nm=lang==="en"?o.templateName:(o.templateNameTamil||o.templateName);
+        return "<tr><td>"+o.date+"</td><td>"+DAY_NAMES[lang][d.getDay()]+"</td><td><strong style='color:"+colorFor(o.templateName)+"'>"+nm+"</strong></td><td style='text-align:center'>"+(o.items||[]).length+"</td></tr>";
+      }).join("");
+      return "<h3 style='margin:16px 0 6px'>"+MONTH_NAMES[lang][mo.monthIdx]+" "+year+"</h3>"+
+        "<table><thead><tr><th>"+t("Date","தேதி")+"</th><th>"+t("Day","நாள்")+"</th><th>"+t("Occasion","நிகழ்வு")+"</th><th>"+t("Items","பொருட்கள்")+"</th></tr></thead><tbody>"+rows+"</tbody></table>";
+    }).join("");
+    printHTML(t("Occasions Calendar","நிகழ்வு காலண்டர்")+" "+year,blocks||"<p>"+t("No occasion orders for this year.","இந்த வருடத்திற்கு நிகழ்வுகள் இல்லை.")+"</p>");
+  };
+
+  return(
+    <div>
+      <ReportBar onPrint={hasData?doPrint:null} onExport={hasData?doExport:null} lang={lang} setLang={setLang}>
+        <div>
+          <label style={css.lbl}>{t("Year","வருடம்")}</label>
+          <select style={{...css.sel,width:110}} value={year} onChange={e=>setYear(+e.target.value)}>
+            {[year-1,year,year+1].map(y=><option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <div style={{fontSize:11,color:P.muted,paddingBottom:6}}>{yearOrders.length} {t("occasion order(s)","நிகழ்வு ஆர்டர்கள்")}</div>
+      </ReportBar>
+
+      {templateNames.length>0&&(
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
+          {templateNames.map(nm=>(
+            <span key={nm} style={{display:"flex",alignItems:"center",gap:5,fontSize:12}}>
+              <span style={{width:10,height:10,borderRadius:"50%",background:colorFor(nm)}}/>{nm}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {!hasData?(
+        <div style={{color:P.muted,textAlign:"center",padding:32}}>{t("No occasion orders created for this year yet.","இந்த வருடத்திற்கு நிகழ்வு ஆர்டர்கள் இல்லை.")}</div>
+      ):(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:14}}>
+          {months.filter(mo=>mo.items.length).map(mo=>(
+            <div key={mo.monthIdx} style={css.card}>
+              <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700,color:P.deepBrown,marginBottom:10,
+                borderBottom:"2px solid #EEE",paddingBottom:6}}>
+                {MONTH_NAMES[lang][mo.monthIdx]} {year}
+              </div>
+              {mo.items.map(o=>{
+                const d=new Date(o.date);
+                const nm=lang==="en"?o.templateName:(o.templateNameTamil||o.templateName);
+                return(
+                  <div key={o.id} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid #F5F0E0"}}>
+                    <span style={{width:8,height:8,borderRadius:"50%",background:colorFor(o.templateName),flexShrink:0}}/>
+                    <span style={{fontSize:12,color:P.muted,width:70,flexShrink:0}}>{d.getDate()} {DAY_NAMES[lang][d.getDay()]}</span>
+                    <strong style={{fontSize:13,flex:1}}>{nm}</strong>
+                    <span style={{fontSize:11,color:P.muted}}>{(o.items||[]).length} {t("items","பொருட்கள்")}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
     </div>
