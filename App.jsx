@@ -3,7 +3,7 @@ import { useKitchenData } from "./useKitchenData.js";
 import { RTYPE_SEED } from "./seeds.js";
 import * as XLSX from "xlsx";
 function PostIssues({ctx,date,onClose}){
-  const {orders,recipes,ingredients,setInventory,lang}=ctx;
+  const {orders,recipes,ingredients,inventory,setInventory,lang}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
   const n=(x)=>lang==="en"?x.name:x.nameTamil;
 
@@ -12,6 +12,11 @@ function PostIssues({ctx,date,onClose}){
   const rows=computeTotals(entries,recipes,ingredients);
   const totals={};
   rows.forEach(r=>{if(!totals[r.d.id])totals[r.d.id]={d:r.d,qty:0,unit:r.unit};totals[r.d.id].qty+=r.qty;});
+
+  // Already-posted auto issues for this exact date — re-posting will REPLACE these
+  // (matched by date + the "Auto from orders" note this function always writes),
+  // rather than appending duplicates on top of them.
+  const alreadyPosted=inventory.issues.filter(iss=>iss.date===date&&(iss.note||"").startsWith("Auto from orders"));
 
   const [edits,setEdits]=useState(Object.fromEntries(Object.values(totals).map(r=>[r.d.id,r.qty.toFixed(2)])));
   const [editing,setEditing]=useState({}); // which rows are in edit mode
@@ -26,7 +31,12 @@ function PostIssues({ctx,date,onClose}){
       note:`Auto from orders ${date}`,
       adjusted:+edits[r.d.id]!==+r.qty.toFixed(2),
     }));
-    setInventory(p=>({...p,issues:[...p.issues,...newIss]}));
+    setInventory(p=>({
+      ...p,
+      // Drop any previous auto-posted issues for this date first, so re-posting refreshes
+      // to the current calculation instead of stacking a second copy on top.
+      issues:[...p.issues.filter(iss=>!(iss.date===date&&(iss.note||"").startsWith("Auto from orders"))),...newIss],
+    }));
     onClose();
   };
 
@@ -40,6 +50,12 @@ function PostIssues({ctx,date,onClose}){
       <div style={{fontSize:12,color:P.muted,marginBottom:14}}>
         {t("Click ✏️ Edit on any row to adjust quantity for taste/quality reasons.","தரம் / சுவை காரணமாக அளவை மாற்ற Edit அழுத்தவும்.")}
       </div>
+
+      {alreadyPosted.length>0&&(
+        <div style={{background:"#FEF3C7",border:"1px solid #F59E0B",borderRadius:7,padding:"8px 12px",marginBottom:14,fontSize:12,color:"#92400E"}}>
+          ⚠️ {t("Issues were already posted for this date","இந்த தேதிக்கு ஏற்கனவே வழங்கல் பதிவு செய்யப்பட்டுள்ளது")} ({alreadyPosted.length} {t("ingredient(s)","பொருட்கள்")}). {t("Posting again will replace them with the current calculated quantities — it will not duplicate them.","மீண்டும் பதிவிட்டால் தற்போதைய கணக்கீட்டுடன் மாற்றப்படும் — நகல் ஆகாது.")}
+        </div>
+      )}
 
       {Object.keys(totals).length===0&&(
         <div style={{color:P.muted,textAlign:"center",padding:16}}>{t("No orders found for this date.","இந்த தேதியில் ஆர்டர் இல்லை.")}</div>
@@ -114,7 +130,7 @@ function PostIssues({ctx,date,onClose}){
 
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
         <button style={css.btn("ghost")} onClick={onClose}>{t("Cancel","ரத்து")}</button>
-        <button style={css.btn("success")} onClick={post}>📦 {t("Post Issues","வழங்கு")}</button>
+        <button style={css.btn("success")} onClick={post}>📦 {alreadyPosted.length>0?t("Re-Post (Replace Existing)","மீண்டும் பதிவு (மாற்று)"):t("Post Issues","வழங்கு")}</button>
       </div>
     </div>
   );
