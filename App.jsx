@@ -353,6 +353,31 @@ function matchLocDefault(loc,rec){
   return best;
 }
 
+// Parses a worksheet into row objects, auto-detecting which row is the real header row —
+// several of this app's own exports (Purchase Order, Shopping List) prepend a banner row
+// like "Locations: All Locations | Dates: ..." above the actual column headers, which
+// breaks a plain sheet_to_json() call that assumes row 1 is always the header row.
+function parseExcelSmart(ws,headerKeywords){
+  const aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:"",dateNF:"yyyy-mm-dd"});
+  let headerRowIdx=0;
+  for(let i=0;i<Math.min(aoa.length,5);i++){
+    const row=aoa[i]||[];
+    const hasMatch=row.some(cell=>{
+      const c=(cell+"").toLowerCase().trim();
+      return headerKeywords.some(k=>c===k);
+    });
+    if(hasMatch){headerRowIdx=i;break;}
+  }
+  const headers=aoa[headerRowIdx]||[];
+  return aoa.slice(headerRowIdx+1)
+    .filter(row=>row.some(cell=>(cell+"").trim()!==""))
+    .map(row=>{
+      const obj={};
+      headers.forEach((h,i)=>{if(h!=="")obj[h]=row[i]!==undefined?row[i]:"";});
+      return obj;
+    });
+}
+
 function normalizeDateCell(val){
   if(val instanceof Date&&!isNaN(val))return val.toISOString().slice(0,10);
   const s=(val+"").trim();
@@ -6541,7 +6566,7 @@ function InvPage({ctx}){
     reader.onload=ev=>{
       const wb=XLSX.read(ev.target.result,{type:"binary",cellDates:true});
       const ws=wb.Sheets[wb.SheetNames[0]];
-      const rows=XLSX.utils.sheet_to_json(ws,{defval:"",raw:false,dateNF:"yyyy-mm-dd"});
+      const rows=parseExcelSmart(ws,["item","ingredient","name","date","bill date","qty","quantity"]);
       if(!rows.length){setLedgerMsg(t("The file has no rows.","கோப்பில் தரவு இல்லை."));e.target.value="";return;}
 
       let imported=0,skippedZero=0; const newUnmatched=[]; const dupSkipped=[];
@@ -6644,7 +6669,7 @@ function InvPage({ctx}){
     reader.onload=ev=>{
       const wb=XLSX.read(ev.target.result,{type:"binary"});
       const ws=wb.Sheets[wb.SheetNames[0]];
-      const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+      const rows=parseExcelSmart(ws,["name","ingredient","item","opening qty","in stock","available"]);
       // Accepts multiple export formats: Opening Stock template ("Ingredient"/"Opening Qty"),
       // Shopping List export ("Ingredient"/"In Stock"), or Purchase Order export ("Name"/"Available").
       const getName=r=>{
@@ -6702,7 +6727,7 @@ function InvPage({ctx}){
     reader.onload=ev=>{
       const wb=XLSX.read(ev.target.result,{type:"binary"});
       const ws=wb.Sheets[wb.SheetNames[0]];
-      const rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+      const rows=parseExcelSmart(ws,["name","ingredient","item","available","in stock","opening qty"]);
       const getName=r=>{
         const v=(r.Ingredient!==undefined&&r.Ingredient!=="")?r.Ingredient:r.Name;
         return (v+"").trim();
