@@ -2165,6 +2165,11 @@ function OrdersPage({ctx}){
   const duplicateToLocations=()=>{
     if(!dupLocDate||!dupLocSource){alert(t("Select a date and source location.","தேதி மற்றும் மூல இடத்தை தேர்வு செய்யவும்."));return;}
     if(!dupLocTargets.length){alert(t("Select at least one target location.","குறைந்தது ஒரு இடத்தையாவது தேர்வு செய்யவும்."));return;}
+    // Catch the easy-to-miss mistake: a checked location with no Pax typed in gets copied
+    // at the source's raw numbers with no pax on the order at all, which is why it then
+    // needs re-entering manually afterward. Flag it clearly instead of silently proceeding.
+    const missingPax=dupLocTargets.filter(id=>!(+dupLocTargetPax[id]>0)).map(id=>locations.find(l=>l.id===id)?.name).filter(Boolean);
+    if(missingPax.length&&!confirm(t("No Pax entered for:","பாக்ஸ் இல்லாதவை:")+" "+missingPax.join(", ")+". "+t("These will copy the source's raw quantities with no pax set, and will need it entered manually afterward. Continue anyway?","மூலத்தின் மூல எண்களை நகலெடுக்கும், பாக்ஸ் கைமுறையாக பிறகு நிரப்ப வேண்டும். தொடரவா?")))return;
     const srcLocId=+dupLocSource;
     const sourceOrders=orders.filter(o=>!o.isTemplate&&o.date===dupLocDate&&(o.entries||[]).some(e=>e.locId===srcLocId&&(dupLocSess==="All"||e.session===dupLocSess)));
     if(!sourceOrders.length){alert(t("No orders found for that date, location, and session.","அந்த தேதி / இடம் / அமர்வுக்கு ஆர்டர் இல்லை."));return;}
@@ -2371,6 +2376,20 @@ function OrdersPage({ctx}){
                 <label style={css.lbl}>{t("Copy to these locations","இந்த இடங்களுக்கு நகலெடு")}</label>
                 <div style={{fontSize:11,color:P.muted,marginBottom:6}}>
                   {t("Set a Pax for each target — if that location has Standard Quantities defined (see 📋 Qty above), quantities come from its own per-person rate; otherwise they scale proportionally from the source. Leave Pax blank to copy the raw numbers as-is. Everything is editable afterward.","ஒவ்வொன்றிற்கும் பாக்ஸ் அமைக்கவும் — நிலையான அளவுகள் இருந்தால் அதன் விகிதம் பயன்படுத்தப்படும், இல்லையெனில் மூலத்திலிருந்து விகிதாசாரமாக மாறும்.")}
+                </div>
+                <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:8}}>
+                  <span style={{fontSize:11,color:P.muted}}>{t("Fill Pax for all checked:","அனைத்திற்கும் பாக்ஸ் நிரப்பு:")}</span>
+                  <input type="number" min="0" step="1" placeholder={t("e.g. 4","எ.கா. 4")}
+                    style={{...css.inp,width:70,padding:"3px 8px",fontSize:12}}
+                    onChange={e=>{
+                      const v=e.target.value;
+                      if(!v)return;
+                      setDupLocTargetPax(p=>{
+                        const next={...p};
+                        dupLocTargets.forEach(id=>{next[id]=v;});
+                        return next;
+                      });
+                    }}/>
                 </div>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   {locations.filter(l=>l.id!==+dupLocSource).map(l=>{
@@ -2792,14 +2811,32 @@ function OrderForm({ctx,ord,onClose}){
   // Scale all entries from their own locked baseQty/basePax — correct on every keystroke
   const changePax=(newPaxStr)=>{
     const np=+newPaxStr;
-    updateF(x=>({
-      ...x,
-      pax:newPaxStr,
-      entries:x.entries.map(e=>{
-        if(!e.basePax||!e.baseQty||np<=0)return e;
-        return {...e, qty:+(e.baseQty*(np/e.basePax)).toFixed(3)};
-      })
-    }));
+    updateF(x=>{
+      const oldPax=+x.pax>0?+x.pax:null;
+      return{
+        ...x,
+        pax:newPaxStr,
+        entries:x.entries.map(e=>{
+          // Self-heal entries that never got a proper basePax lock — this happens when
+          // items are added to an order before pax is filled in, which is a completely
+          // normal workflow. Without this, changePax would silently skip scaling that
+          // entry forever, leaving its quantity frozen and increasingly wrong every time
+          // pax is edited again.
+          const hadBase=e.basePax||oldPax;
+          const baseQty=e.baseQty||e.qty;
+          if(!baseQty||np<=0)return e;
+          if(!hadBase){
+            // No reference ever existed (pax was blank the whole time until now) — there's
+            // nothing valid to scale from, so treat the current quantity as already being
+            // for `np` people and just lock that in, rather than guessing a scale factor.
+            return{...e,basePax:np,baseQty};
+          }
+          // A reference exists (either on the entry itself, or the order had a pax before
+          // this change) — scale correctly from it, and re-anchor for next time.
+          return{...e,qty:+(baseQty*(np/hadBase)).toFixed(3),basePax:hadBase,baseQty};
+        })
+      };
+    });
   };
 
   const addEntry=()=>{
