@@ -1978,6 +1978,9 @@ function OrdersPage({ctx}){
   const [dupRangeFrom,setDupRangeFrom]=useState(TODAY);
   const [dupRangeTo,setDupRangeTo]=useState(TODAY);
   const [dupRangeTarget,setDupRangeTarget]=useState(TODAY);
+  const [dupRangeSess,setDupRangeSess]=useState("All");
+  const [dupRangeLocs,setDupRangeLocs]=useState([]); // empty = all locations
+  const toggleDupRangeLoc=id=>setDupRangeLocs(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
   const [dupLocDate,setDupLocDate]=useState(TODAY);
   const [dupLocSource,setDupLocSource]=useState("");
   const [dupLocTargets,setDupLocTargets]=useState([]);
@@ -2132,7 +2135,9 @@ function OrdersPage({ctx}){
   const dupRangeMatchCount=(()=>{
     const s=new Date(dupRangeFrom),e=new Date(dupRangeTo);
     if(s>e)return 0;
-    return orders.filter(o=>!o.isTemplate&&new Date(o.date)>=s&&new Date(o.date)<=e).length;
+    return orders.filter(o=>!o.isTemplate&&new Date(o.date)>=s&&new Date(o.date)<=e)
+      .filter(o=>(o.entries||[]).some(en=>(dupRangeSess==="All"||en.session===dupRangeSess)&&(!dupRangeLocs.length||dupRangeLocs.includes(en.locId))))
+      .length;
   })();
 
   const shiftDateRange=()=>{
@@ -2144,9 +2149,13 @@ function OrdersPage({ctx}){
     if(!source.length){alert(t("No orders found in that date range.","அந்த தேதி வரம்பில் ஆர்டர் இல்லை."));return;}
     const copies=source.map((o,i)=>{
       const newDate=new Date(new Date(o.date).getTime()+offsetMs).toISOString().slice(0,10);
-      const newEntries=(o.entries||[]).map(en=>({...en}));
+      const newEntries=(o.entries||[])
+        .filter(en=>(dupRangeSess==="All"||en.session===dupRangeSess)&&(!dupRangeLocs.length||dupRangeLocs.includes(en.locId)))
+        .map(en=>({...en}));
+      if(!newEntries.length)return null;
       return{...o,id:Date.now()+i,date:newDate,name:o.name,entries:newEntries,costSnapshot:costOfEntries(newEntries)};
-    });
+    }).filter(Boolean);
+    if(!copies.length){alert(t("No entries matched the selected session/locations in that date range.","தேர்ந்த அமர்வு / இடங்களுக்கு பொருந்தும் பதிவுகள் இல்லை."));return;}
     setOrders(p=>[...p,...copies]);
     setDupOpen(false);
     const lastDate=copies.reduce((mx,c)=>c.date>mx?c.date:mx,copies[0].date);
@@ -2334,6 +2343,34 @@ function OrdersPage({ctx}){
                 <div style={{fontSize:11,color:P.muted,paddingBottom:8}}>
                   {dupRangeDayCount} {t("day(s) in source","நாட்கள்")}, {dupRangeMatchCount} {t("order(s) found","ஆர்டர்கள் கிடைத்தன")}
                 </div>
+              </div>
+              <div style={{marginTop:10,marginBottom:10}}>
+                <label style={css.lbl}>{t("Session","அமர்வு")}</label>
+                <div style={{display:"flex",gap:4}}>
+                  {["All",...SESSIONS].map(s=>(
+                    <button key={s} style={{...css.btn(dupRangeSess===s?"primary":"ghost",true),
+                      borderColor:s!=="All"?(SCOLOR[s]||P.muted):"#DCC88A",
+                      color:dupRangeSess===s?"white":(s!=="All"?SCOLOR[s]:P.deepBrown),
+                      background:dupRangeSess===s?(SCOLOR[s]||P.saffron):"transparent",
+                    }} onClick={()=>setDupRangeSess(s)}>{s==="All"?t("All","அனைத்தும்"):s}</button>
+                  ))}
+                </div>
+              </div>
+              <div style={{marginBottom:10}}>
+                <label style={css.lbl}>{t("Locations","இடங்கள்")}</label>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  <button style={css.btn(dupRangeLocs.length===0?"primary":"ghost",true)} onClick={()=>setDupRangeLocs([])}>{t("All","அனைத்தும்")}</button>
+                  {locations.map(l=>(
+                    <label key={l.id} style={{display:"flex",alignItems:"center",gap:4,fontSize:12,cursor:"pointer",
+                      background:dupRangeLocs.includes(l.id)?P.saffron+"22":"white",
+                      border:"1px solid "+(dupRangeLocs.includes(l.id)?P.saffron:"#DCC88A"),borderRadius:7,padding:"4px 9px"}}>
+                      <input type="checkbox" checked={dupRangeLocs.includes(l.id)} onChange={()=>toggleDupRangeLoc(l.id)}/>
+                      {lang==="en"?l.name:l.nameTamil}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div style={{display:"flex",gap:8}}>
                 <button style={css.btn("success")} onClick={shiftDateRange}>✓ {t("Duplicate Range","வரம்பை நகலெடு")}</button>
                 <button style={css.btn("ghost")} onClick={()=>setDupOpen(false)}>{t("Cancel","ரத்து")}</button>
               </div>
