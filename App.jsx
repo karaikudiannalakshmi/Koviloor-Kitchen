@@ -378,6 +378,23 @@ function parseExcelSmart(ws,headerKeywords){
     });
 }
 
+// Compares each ingredient's current normative cost against its most recent purchase
+// price. Shared by the Inventory Cost Alerts sync button and the Recipes page sync
+// button, so both stay consistent.
+function computeNormSyncChanges(ingredients,inventory){
+  const latestCpu=iid=>{
+    const ps=[...inventory.purchases.filter(x=>x.iid===iid)].sort((a,b)=>b.date.localeCompare(a.date));
+    return ps.length?ps[0].cpu:null;
+  };
+  return ingredients.map(ing=>{
+    const latest=latestCpu(ing.id);
+    if(latest===null||!latest)return null;
+    const old=ing.normCost||0;
+    if(Math.abs(latest-old)<0.001)return null; // already in sync
+    return{ing,oldCost:old,newCost:latest,pctChange:old?((latest-old)/old*100):null};
+  }).filter(Boolean).sort((a,b)=>Math.abs(b.pctChange||0)-Math.abs(a.pctChange||0));
+}
+
 function normalizeDateCell(val){
   if(val instanceof Date&&!isNaN(val))return val.toISOString().slice(0,10);
   const s=(val+"").trim();
@@ -1217,13 +1234,27 @@ function IngSubstituteModal({ctx,onClose}){
 // RECIPES
 // ════════════════════════════════════════════════════════════════════
 function RecsPage({ctx}){
-  const {recipes,setRecipes,ingredients,recipeTypes,lang,setModal}=ctx;
+  const {recipes,setRecipes,ingredients,setIngredients,inventory,recipeTypes,lang,setModal}=ctx;
   const t=(en,ta)=>lang==="en"?en:ta;
   const [q,setQ]=useState("");
   const [typeF,setTypeF]=useState("all");
   const [translating,setTranslating]=useState(false);
   const [transProgress,setTransProgress]=useState("");
   const recFileRef=useRef();
+  const [normSyncMsg,setNormSyncMsg]=useState("");
+
+  // Update every ingredient's normative cost to its latest purchase price — recipe costs
+  // shown on this page read normCost live, so they reflect the change immediately.
+  const syncNormCosts=()=>{
+    const changes=computeNormSyncChanges(ingredients,inventory);
+    if(!changes.length){setNormSyncMsg(t("All ingredient costs already match their latest purchase price.","அனைத்து பொருட்களின் விலையும் ஏற்கனவே பொருந்துகிறது."));return;}
+    if(!confirm(t("Update normative cost for","")+" "+changes.length+" "+t("ingredient(s) to match their latest purchase price? Recipe costs below will update immediately; orders already placed are not affected.","பொருட்களின் விலையை புதுப்பிக்கவா? கீழே உள்ள சமையல் செலவுகள் உடனே புதுப்பிக்கப்படும்.")))return;
+    const updates=new Map(changes.map(c=>[c.ing.id,c.newCost]));
+    setIngredients(p=>p.map(i=>updates.has(i.id)?{...i,normCost:updates.get(i.id)}:i));
+    setNormSyncMsg(t("Updated","புதுப்பிக்கப்பட்டது")+" "+changes.length+" "+t("ingredient(s):","பொருட்கள்:")+" "+
+      changes.slice(0,5).map(c=>(lang==="en"?c.ing.name:(c.ing.nameTamil||c.ing.name))+" (₹"+c.oldCost.toFixed(2)+"→₹"+c.newCost.toFixed(2)+")").join(", ")+
+      (changes.length>5?" +"+(changes.length-5)+" "+t("more","மேலும்"):""));
+  };
 
   const exportRecipes=()=>{
     const data=recipes.map(r=>({
@@ -1321,12 +1352,18 @@ function RecsPage({ctx}){
         <input style={{...css.inp,maxWidth:220}} placeholder={t("Search recipes...","தேடு...")} value={q} onChange={e=>setQ(e.target.value)}/>
         <div style={{marginLeft:"auto",display:"flex",gap:6}}>
           <button style={css.btn("ghost",true)} onClick={()=>setModal({type:"recipeTypes"})}>⚙️ {t("Manage Types","வகை நிர்வகி")}</button>
+          <button style={{...css.btn("ghost",true),borderColor:P.info,color:P.info}} onClick={syncNormCosts}>🔄 {t("Update Cost from Purchases","கொள்முதலிலிருந்து விலை புதுப்பி")}</button>
           <button style={css.btn("ghost",true)} onClick={exportRecipes}>⬇️ {t("Export Names","பெயர் ஏற்று")}</button>
           <button style={css.btn("success",true)} onClick={()=>recFileRef.current.click()}>📤 {t("Import Tamil","தமிழ் இறக்கு")}</button>
           <input ref={recFileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importRecipesTamil}/>
           <button data-tour="add-recipe" style={css.btn()} onClick={()=>setModal({type:"recipe"})}>+ {t("Add Recipe","சேர்")}</button>
         </div>
       </div>
+      {normSyncMsg&&(
+        <div style={{background:"#EEF2FF",border:"1px solid #A5B4FC",borderRadius:7,padding:"8px 12px",marginBottom:10,fontSize:12,color:"#3730A3"}}>
+          ✓ {normSyncMsg}
+        </div>
+      )}
       <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
         <button style={css.btn(typeF==="all"?"primary":"ghost",true)} onClick={()=>setTypeF("all")}>{t("All Types","அனைத்தும்")}</button>
         {usedTypes.map(tid=>{const tp=recipeTypes.find(x=>x.id===tid);return tp?<button key={tid} style={{...css.btn("ghost",true),borderColor:tp.color||P.muted,color:tp.color||P.muted,fontWeight:typeF===tid?700:400}} onClick={()=>setTypeF(typeF===tid?"all":tid)}>{lang==="en"?tp.en:tp.ta}</button>:null;})}
@@ -6878,13 +6915,7 @@ function InvPage({ctx}){
   // automatically everywhere the moment this runs — orders already placed keep their
   // own frozen cost snapshot and are not touched.
   const syncNormCosts=()=>{
-    const changes=ingredients.map(ing=>{
-      const latest=latestCpu(ing.id);
-      if(latest===null||!latest)return null;
-      const old=ing.normCost||0;
-      if(Math.abs(latest-old)<0.001)return null; // already in sync
-      return{ing,oldCost:old,newCost:latest,pctChange:old?((latest-old)/old*100):null};
-    }).filter(Boolean).sort((a,b)=>Math.abs(b.pctChange||0)-Math.abs(a.pctChange||0));
+    const changes=computeNormSyncChanges(ingredients,inventory);
 
     if(!changes.length){setNormSyncResult([]);return;}
     if(!confirm(t("Update normative cost for","")+" "+changes.length+" "+t("ingredient(s) to match their latest purchase price? This updates recipe costing immediately; existing orders already placed are not affected.","பொருட்களின் நிலையான விலையை புதுப்பிக்கவா? ஏற்கனவே உள்ள ஆர்டர்கள் பாதிக்கப்படாது.")))return;
