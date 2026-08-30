@@ -2008,7 +2008,7 @@ function OrdersPage({ctx}){
   const [dateQ,setDateQ]=useState("");
   const [nameQ,setNameQ]=useState("");
   const [dupOpen,setDupOpen]=useState(false);
-  const [dupMode,setDupMode]=useState("day"); // "day" | "range" | "loc"
+  const [dupMode,setDupMode]=useState("day"); // "day" | "range" | "loc" | "rangeLoc" | "repeat"
   const [dupFrom,setDupFrom]=useState(TODAY);
   const [dupTo,setDupTo]=useState(TODAY);
   const [dupSess,setDupSess]=useState("All");
@@ -2023,6 +2023,13 @@ function OrdersPage({ctx}){
   const [dupLocTargets,setDupLocTargets]=useState([]);
   const [dupLocSess,setDupLocSess]=useState("All");
   const [dupLocTargetPax,setDupLocTargetPax]=useState({}); // {locId: pax}
+  const [dupR2LFrom,setDupR2LFrom]=useState(TODAY);
+  const [dupR2LTo,setDupR2LTo]=useState(TODAY);
+  const [dupR2LSource,setDupR2LSource]=useState("");
+  const [dupR2LSess,setDupR2LSess]=useState("All");
+  const [dupR2LTargets,setDupR2LTargets]=useState([]);
+  const [dupR2LTargetPax,setDupR2LTargetPax]=useState({});
+  const toggleDupR2LTarget=id=>setDupR2LTargets(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
   const [dupRepSourceDate,setDupRepSourceDate]=useState(TODAY);
   const [dupRepSourceLoc,setDupRepSourceLoc]=useState("");
   const [dupRepStart,setDupRepStart]=useState(TODAY);
@@ -2262,6 +2269,58 @@ function OrdersPage({ctx}){
     setDupLocTargetPax({});
   };
 
+  // Same target-location logic as duplicateToLocations, but sourced from a whole date
+  // range instead of one day — each date keeps its own date in the copies, unshifted.
+  const duplicateRangeToLocations=()=>{
+    if(!dupR2LFrom||!dupR2LTo||!dupR2LSource){alert(t("Select a date range and source location.","தேதி வரம்பு மற்றும் மூல இடத்தை தேர்வு செய்யவும்."));return;}
+    const s=new Date(dupR2LFrom),e=new Date(dupR2LTo);
+    if(s>e){alert(t("From date must be before To date.","இருந்து தேதி வரை தேதிக்கு முன் இருக்க வேண்டும்."));return;}
+    if(!dupR2LTargets.length){alert(t("Select at least one target location.","குறைந்தது ஒரு இடத்தையாவது தேர்வு செய்யவும்."));return;}
+    const missingPax=dupR2LTargets.filter(id=>!(+dupR2LTargetPax[id]>0)).map(id=>locations.find(l=>l.id===id)?.name).filter(Boolean);
+    if(missingPax.length&&!confirm(t("No Pax entered for:","பாக்ஸ் இல்லாதவை:")+" "+missingPax.join(", ")+". "+t("These will copy the source's raw quantities with no pax set, and will need it entered manually afterward. Continue anyway?","மூலத்தின் மூல எண்களை நகலெடுக்கும், பாக்ஸ் கைமுறையாக பிறகு நிரப்ப வேண்டும். தொடரவா?")))return;
+
+    const srcLocId=+dupR2LSource;
+    const sourceOrders=orders.filter(o=>!o.isTemplate&&new Date(o.date)>=s&&new Date(o.date)<=e&&
+      (o.entries||[]).some(en=>en.locId===srcLocId&&(dupR2LSess==="All"||en.session===dupR2LSess)));
+    if(!sourceOrders.length){alert(t("No orders found for that date range, location, and session.","அந்த தேதி வரம்பு / இடம் / அமர்வுக்கு ஆர்டர் இல்லை."));return;}
+
+    const newOrders=[]; let idc=Date.now();
+    dupR2LTargets.forEach(targetId=>{
+      const targetPax=+dupR2LTargetPax[targetId]||null;
+      const targetLoc=locations.find(l=>l.id===targetId);
+      sourceOrders.forEach(o=>{
+        const entries=(o.entries||[]).filter(en=>en.locId===srcLocId&&(dupR2LSess==="All"||en.session===dupR2LSess)).map(en=>{
+          if(targetPax){
+            const rec=recipes.find(r=>r.id===en.recId);
+            const rule=matchLocDefault(targetLoc,rec);
+            if(rule){
+              const newQty=+(rule.qty*targetPax).toFixed(3);
+              return{...en,locId:targetId,qty:newQty,baseQty:newQty,basePax:targetPax};
+            }
+          }
+          const srcBasePax=en.basePax||(+o.pax||null);
+          const srcBaseQty=en.baseQty||en.qty;
+          if(targetPax&&srcBasePax&&srcBaseQty){
+            const newQty=+(srcBaseQty*(targetPax/srcBasePax)).toFixed(3);
+            return{...en,locId:targetId,qty:newQty,baseQty:newQty,basePax:targetPax};
+          }
+          return{...en,locId:targetId};
+        });
+        if(!entries.length)return;
+        const locLabel=targetLoc?(lang==="en"?targetLoc.name:(targetLoc.nameTamil||targetLoc.name)):"";
+        const newName=locLabel||o.name;
+        newOrders.push({id:idc++,name:newName,date:o.date,isTemplate:false,pax:targetPax||"",entries,costSnapshot:costOfEntries(entries)});
+      });
+    });
+    setOrders(p=>[...p,...newOrders]);
+    setDupOpen(false);
+    const targetNames=dupR2LTargets.map(id=>locations.find(l=>l.id===id)?.name).filter(Boolean).join(", ");
+    const dayCount=[...new Set(sourceOrders.map(o=>o.date))].length;
+    alert(newOrders.length+" "+t("order(s) created across","ஆர்டர்(கள்) உருவாக்கப்பட்டன")+" "+dayCount+" "+t("day(s) for:","நாட்களுக்கு:")+" "+targetNames);
+    setDupR2LTargets([]);
+    setDupR2LTargetPax({});
+  };
+
   const dupRepEntryCount=locId=>orders
     .filter(o=>!o.isTemplate&&o.date===dupRepSourceDate)
     .flatMap(o=>o.entries||[])
@@ -2328,6 +2387,7 @@ function OrdersPage({ctx}){
             <button style={css.btn(dupMode==="day"?"primary":"ghost",true)} onClick={()=>setDupMode("day")}>{t("Single Day","ஒரு நாள்")}</button>
             <button style={css.btn(dupMode==="range"?"primary":"ghost",true)} onClick={()=>setDupMode("range")}>{t("Date Range","தேதி வரம்பு")}</button>
             <button style={css.btn(dupMode==="loc"?"primary":"ghost",true)} onClick={()=>setDupMode("loc")}>{t("Other Locations","மற்ற இடங்கள்")}</button>
+            <button style={css.btn(dupMode==="rangeLoc"?"primary":"ghost",true)} onClick={()=>setDupMode("rangeLoc")}>{t("Range → Locations","வரம்பு → இடங்கள்")}</button>
             <button style={css.btn(dupMode==="repeat"?"primary":"ghost",true)} onClick={()=>setDupMode("repeat")}>{t("Repeat Daily","தினமும் மீண்டும்")}</button>
           </div>
 
@@ -2489,6 +2549,86 @@ function OrdersPage({ctx}){
               </div>
               <div style={{display:"flex",gap:8}}>
                 <button style={css.btn("success")} onClick={duplicateToLocations}>✓ {t("Duplicate to Selected Locations","தேர்ந்த இடங்களுக்கு நகலெடு")}</button>
+                <button style={css.btn("ghost")} onClick={()=>setDupOpen(false)}>{t("Cancel","ரத்து")}</button>
+              </div>
+            </div>
+          ):dupMode==="rangeLoc"?(
+            <div>
+              <div style={{fontSize:11,color:P.muted,marginBottom:8}}>
+                {t("Copies every day's orders from a date range at a source location into one or more other locations — each day keeps its own date, so a whole week or month of varying menus can be replicated to new locations at once.","ஒரு தேதி வரம்பின் ஆர்டர்களை மற்ற இடங்களுக்கு நகலெடுக்கும் — ஒவ்வொரு நாளும் அதன் தேதியை வைத்திருக்கும்.")}
+              </div>
+              <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap",marginBottom:10}}>
+                <div>
+                  <label style={css.lbl}>{t("Source: From","மூலம்: இருந்து")}</label>
+                  <input type="date" style={{...css.inp,width:150}} value={dupR2LFrom} onChange={e=>setDupR2LFrom(e.target.value)}/>
+                </div>
+                <div>
+                  <label style={css.lbl}>{t("Source: To","மூலம்: வரை")}</label>
+                  <input type="date" style={{...css.inp,width:150}} value={dupR2LTo} onChange={e=>setDupR2LTo(e.target.value)}/>
+                </div>
+                <div>
+                  <label style={css.lbl}>{t("Copy from location","இதிலிருந்து நகலெடு")}</label>
+                  <select style={{...css.sel,minWidth:220}} value={dupR2LSource} onChange={e=>setDupR2LSource(e.target.value)}>
+                    <option value="">{t("Select...","தேர்வு...")}</option>
+                    {locations.map(l=><option key={l.id} value={l.id}>{lang==="en"?l.name:l.nameTamil}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div style={{marginBottom:10}}>
+                <label style={css.lbl}>{t("Session","அமர்வு")}</label>
+                <div style={{display:"flex",gap:4}}>
+                  {["All",...SESSIONS].map(s=>(
+                    <button key={s} style={{...css.btn(dupR2LSess===s?"primary":"ghost",true),
+                      borderColor:s!=="All"?(SCOLOR[s]||P.muted):"#DCC88A",
+                      color:dupR2LSess===s?"white":(s!=="All"?SCOLOR[s]:P.deepBrown),
+                      background:dupR2LSess===s?(SCOLOR[s]||P.saffron):"transparent",
+                    }} onClick={()=>setDupR2LSess(s)}>{s==="All"?t("All","அனைத்தும்"):s}</button>
+                  ))}
+                </div>
+              </div>
+              <div style={{marginBottom:10}}>
+                <label style={css.lbl}>{t("Copy to these locations","இந்த இடங்களுக்கு நகலெடு")}</label>
+                <div style={{fontSize:11,color:P.muted,marginBottom:6}}>
+                  {t("Set a Pax for each target — if that location has Standard Quantities defined, quantities come from its own per-person rate; otherwise they scale proportionally from the source. Leave Pax blank to copy the raw numbers as-is.","ஒவ்வொன்றிற்கும் பாக்ஸ் அமைக்கவும்.")}
+                </div>
+                <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:8}}>
+                  <span style={{fontSize:11,color:P.muted}}>{t("Fill Pax for all checked:","அனைத்திற்கும் பாக்ஸ் நிரப்பு:")}</span>
+                  <input type="number" min="0" step="1" placeholder={t("e.g. 4","எ.கா. 4")}
+                    style={{...css.inp,width:70,padding:"3px 8px",fontSize:12}}
+                    onChange={e=>{
+                      const v=e.target.value;
+                      if(!v)return;
+                      setDupR2LTargetPax(p=>{
+                        const next={...p};
+                        dupR2LTargets.forEach(id=>{next[id]=v;});
+                        return next;
+                      });
+                    }}/>
+                </div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {locations.filter(l=>l.id!==+dupR2LSource).map(l=>{
+                    const checked=dupR2LTargets.includes(l.id);
+                    return(
+                      <div key={l.id} style={{display:"flex",alignItems:"center",gap:6,
+                        background:checked?P.saffron+"22":"white",
+                        border:"1px solid "+(checked?P.saffron:"#DCC88A"),borderRadius:7,padding:"5px 10px"}}>
+                        <label style={{display:"flex",alignItems:"center",gap:5,fontSize:12,cursor:"pointer"}}>
+                          <input type="checkbox" checked={checked} onChange={()=>toggleDupR2LTarget(l.id)}/>
+                          {lang==="en"?l.name:l.nameTamil}
+                        </label>
+                        {checked&&(
+                          <input type="number" min="0" step="1" placeholder={t("Pax","பாக்ஸ்")}
+                            style={{...css.inp,width:60,padding:"2px 6px",fontSize:12}}
+                            value={dupR2LTargetPax[l.id]||""}
+                            onChange={e=>setDupR2LTargetPax(p=>({...p,[l.id]:e.target.value}))}/>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <button style={css.btn("success")} onClick={duplicateRangeToLocations}>✓ {t("Duplicate Range to Selected Locations","வரம்பை தேர்ந்த இடங்களுக்கு நகலெடு")}</button>
                 <button style={css.btn("ghost")} onClick={()=>setDupOpen(false)}>{t("Cancel","ரத்து")}</button>
               </div>
             </div>
