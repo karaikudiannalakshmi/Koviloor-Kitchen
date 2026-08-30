@@ -2153,6 +2153,38 @@ function OrdersPage({ctx}){
     return s+(rec?computeRecipeCost(rec,e.qty/(rec.yield||1),recipes,ingredients):0);
   },0).toFixed(2);
 
+  // Shared safeguard for every duplicate mode: checks whether any (date, location) the
+  // operation is about to touch already has an existing order there, and requires an
+  // explicit confirmation — listing what would be created and flagging any conflicts —
+  // before anything is actually written. Returns true to proceed, false to abort with
+  // nothing created, so a wrong date range or location choice can be caught up front
+  // instead of needing to manually delete a pile of orders afterward.
+  const confirmDuplicate=(newOrders,summaryText)=>{
+    if(!newOrders.length)return false;
+    const conflictSet=new Set();
+    newOrders.forEach(o=>{
+      const locIds=[...new Set((o.entries||[]).map(e=>e.locId))];
+      locIds.forEach(locId=>{
+        const exists=orders.some(ex=>!ex.isTemplate&&ex.date===o.date&&(ex.entries||[]).some(e=>e.locId===locId));
+        if(exists)conflictSet.add(o.date+"|"+locId);
+      });
+    });
+    let msg=summaryText;
+    if(conflictSet.size>0){
+      const sample=[...conflictSet].slice(0,6).map(k=>{
+        const[date,locId]=k.split("|");
+        const locName=locations.find(l=>l.id===+locId)?.name||"?";
+        return date+" - "+locName;
+      }).join(", ");
+      msg+="\n\n⚠️ "+t("Already has an order:","ஏற்கனவே ஆர்டர் உள்ளது:")+" "+conflictSet.size+" "+t("location/date combo(s):","இட/தேதி:")+"\n"+sample+
+        (conflictSet.size>6?" +"+(conflictSet.size-6)+" "+t("more","மேலும்"):"")+
+        "\n\n"+t("This will ADD alongside the existing order(s), not replace them.","இது ஏற்கனவே உள்ளதுடன் சேரும், மாற்றாது.")+" "+t("Continue?","தொடரவா?");
+    } else {
+      msg+="\n\n"+t("Continue?","தொடரவா?");
+    }
+    return confirm(msg);
+  };
+
   const duplicateDay=()=>{
     if(!dupFrom||!dupTo)return;
     if(dupFrom===dupTo){alert(t("Source and target date are the same.","இருந்து மற்றும் புதிய தேதி ஒன்றே."));return;}
@@ -2166,9 +2198,9 @@ function OrdersPage({ctx}){
       copies.push({...o,id:Date.now()+i,date:dupTo,name:o.name,entries:newEntries,costSnapshot:costOfEntries(newEntries)});
     });
     if(!copies.length){alert(t("No entries found for that date and session.","அந்த தேதி / அமர்வுக்கு பதிவுகள் இல்லை."));return;}
+    if(!confirmDuplicate(copies,copies.length+" "+t("order(s) will be created for","ஆர்டர்(கள்) உருவாக்கப்படும்")+" "+dupTo+(dupSess!=="All"?" ("+dupSess+")":"")+"."))return;
     setOrders(p=>[...p,...copies]);
     setDupOpen(false);
-    alert(copies.length+" "+t("order(s) duplicated to","ஆர்டர்(கள்) நகலெடுக்கப்பட்டன")+" "+dupTo+(dupSess!=="All"?" ("+dupSess+")":""));
   };
 
   const dupRangeDayCount=(()=>{
@@ -2200,10 +2232,10 @@ function OrdersPage({ctx}){
       return{...o,id:Date.now()+i,date:newDate,name:o.name,entries:newEntries,costSnapshot:costOfEntries(newEntries)};
     }).filter(Boolean);
     if(!copies.length){alert(t("No entries matched the selected session/locations in that date range.","தேர்ந்த அமர்வு / இடங்களுக்கு பொருந்தும் பதிவுகள் இல்லை."));return;}
+    const lastDate=copies.reduce((mx,c)=>c.date>mx?c.date:mx,copies[0].date);
+    if(!confirmDuplicate(copies,copies.length+" "+t("order(s) will be created, starting","ஆர்டர்(கள்) உருவாக்கப்படும், தொடங்கும்")+" "+dupRangeTarget+" ("+t("through","வரை")+" "+lastDate+")."))return;
     setOrders(p=>[...p,...copies]);
     setDupOpen(false);
-    const lastDate=copies.reduce((mx,c)=>c.date>mx?c.date:mx,copies[0].date);
-    alert(copies.length+" "+t("order(s) duplicated, shifted to start","ஆர்டர்(கள்) நகலெடுக்கப்பட்டன, தொடங்கும்")+" "+dupRangeTarget+" ("+t("through","வரை")+" "+lastDate+")");
   };
 
   // All locations are selectable as source; annotate with how many entries exist on the picked date/session
@@ -2261,10 +2293,11 @@ function OrdersPage({ctx}){
         newOrders.push({id:idc++,name:newName,date:dupLocDate,isTemplate:false,pax:targetPax||"",entries,costSnapshot:costOfEntries(entries)});
       });
     });
+    if(!newOrders.length){alert(t("No entries found for that date, location, and session.","அந்த தேதி / இடம் / அமர்வுக்கு பதிவுகள் இல்லை."));return;}
+    const targetNames=dupLocTargets.map(id=>locations.find(l=>l.id===id)?.name).filter(Boolean).join(", ");
+    if(!confirmDuplicate(newOrders,newOrders.length+" "+t("order(s) will be created for:","ஆர்டர்(கள்) உருவாக்கப்படும்:")+" "+targetNames+"."))return;
     setOrders(p=>[...p,...newOrders]);
     setDupOpen(false);
-    const targetNames=dupLocTargets.map(id=>locations.find(l=>l.id===id)?.name).filter(Boolean).join(", ");
-    alert(newOrders.length+" "+t("order(s) created for","ஆர்டர்(கள்) உருவாக்கப்பட்டன")+": "+targetNames);
     setDupLocTargets([]);
     setDupLocTargetPax({});
   };
@@ -2312,11 +2345,12 @@ function OrdersPage({ctx}){
         newOrders.push({id:idc++,name:newName,date:o.date,isTemplate:false,pax:targetPax||"",entries,costSnapshot:costOfEntries(entries)});
       });
     });
-    setOrders(p=>[...p,...newOrders]);
-    setDupOpen(false);
+    if(!newOrders.length){alert(t("No entries found for that date range, location, and session.","அந்த தேதி வரம்பு / இடம் / அமர்வுக்கு பதிவுகள் இல்லை."));return;}
     const targetNames=dupR2LTargets.map(id=>locations.find(l=>l.id===id)?.name).filter(Boolean).join(", ");
     const dayCount=[...new Set(sourceOrders.map(o=>o.date))].length;
-    alert(newOrders.length+" "+t("order(s) created across","ஆர்டர்(கள்) உருவாக்கப்பட்டன")+" "+dayCount+" "+t("day(s) for:","நாட்களுக்கு:")+" "+targetNames);
+    if(!confirmDuplicate(newOrders,newOrders.length+" "+t("order(s) will be created across","ஆர்டர்(கள்) உருவாக்கப்படும்")+" "+dayCount+" "+t("day(s) for:","நாட்களுக்கு:")+" "+targetNames+"."))return;
+    setOrders(p=>[...p,...newOrders]);
+    setDupOpen(false);
     setDupR2LTargets([]);
     setDupR2LTargetPax({});
   };
@@ -2342,10 +2376,11 @@ function OrdersPage({ctx}){
         newOrders.push({id:idc++,name:o.name,date:dateStr,isTemplate:false,pax:"",entries,costSnapshot:costOfEntries(entries)});
       });
     }
+    if(!newOrders.length){alert(t("No entries found for that date, location, and session.","அந்த தேதி / இடம் / அமர்வுக்கு பதிவுகள் இல்லை."));return;}
+    const endDate=new Date(dupRepStart); endDate.setDate(endDate.getDate()+days-1);
+    if(!confirmDuplicate(newOrders,newOrders.length+" "+t("order(s) will be created,","ஆர்டர்(கள்) உருவாக்கப்படும்,")+" "+dupRepStart+" "+t("through","வரை")+" "+endDate.toISOString().slice(0,10)+"."))return;
     setOrders(p=>[...p,...newOrders]);
     setDupOpen(false);
-    const endDate=new Date(dupRepStart); endDate.setDate(endDate.getDate()+days-1);
-    alert(newOrders.length+" "+t("order(s) created,","ஆர்டர்(கள்) உருவாக்கப்பட்டன,")+" "+dupRepStart+" "+t("through","வரை")+" "+endDate.toISOString().slice(0,10));
   };
 
   return(
