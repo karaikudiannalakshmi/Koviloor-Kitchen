@@ -2373,7 +2373,7 @@ function OrdersPage({ctx}){
       sourceOrders.forEach(o=>{
         const entries=(o.entries||[]).filter(e=>e.locId===srcLocId&&(dupRepSess==="All"||e.session===dupRepSess)).map(e=>({...e}));
         if(!entries.length)return;
-        newOrders.push({id:idc++,name:o.name,date:dateStr,isTemplate:false,pax:"",entries,costSnapshot:costOfEntries(entries)});
+        newOrders.push({id:idc++,name:o.name,date:dateStr,isTemplate:false,pax:o.pax||"",entries,costSnapshot:costOfEntries(entries)});
       });
     }
     if(!newOrders.length){alert(t("No entries found for that date, location, and session.","அந்த தேதி / இடம் / அமர்வுக்கு பதிவுகள் இல்லை."));return;}
