@@ -767,18 +767,24 @@ function IngsPage({ctx}){
 
   // ── Duplicate-name detection ────────────────────────────────────────────
   const normalizeName=s=>(s||"").toLowerCase().trim().replace(/[^a-z0-9]/g,"");
+  const normalizeTamil=s=>(s||"").trim().replace(/\s+/g,"");
   const dupGroups=useMemo(()=>{
     const groups=[]; const used=new Set();
     for(let i=0;i<ingredients.length;i++){
       if(used.has(ingredients[i].id))continue;
       const group=[ingredients[i]];
-      const a=normalizeName(ingredients[i].name);
+      const aEn=normalizeName(ingredients[i].name);
+      const aTa=normalizeTamil(ingredients[i].nameTamil);
       for(let j=i+1;j<ingredients.length;j++){
         if(used.has(ingredients[j].id))continue;
-        const b=normalizeName(ingredients[j].name);
-        const dist=levenshtein(a,b);
-        const closeEnough=(a===b&&a.length>0)||(Math.min(a.length,b.length)>=4&&dist<=2);
-        if(closeEnough){group.push(ingredients[j]);used.add(ingredients[j].id);}
+        const bEn=normalizeName(ingredients[j].name);
+        const bTa=normalizeTamil(ingredients[j].nameTamil);
+        // Duplicate if EITHER the English name is close, OR the Tamil name is close —
+        // catches ingredients imported with an identical Tamil name but a different
+        // (or missing) English name, which a name-only English check would miss entirely.
+        const enClose=(aEn===bEn&&aEn.length>0)||(Math.min(aEn.length,bEn.length)>=4&&levenshtein(aEn,bEn)<=2);
+        const taClose=aTa&&bTa&&((aTa===bTa)||(Math.min(aTa.length,bTa.length)>=4&&levenshtein(aTa,bTa)<=2));
+        if(enClose||taClose){group.push(ingredients[j]);used.add(ingredients[j].id);}
       }
       if(group.length>1){groups.push(group);used.add(ingredients[i].id);}
     }
@@ -1044,8 +1050,8 @@ function DupGroupRow({group,lang,mergeGroup}){
         {group.map(g=>(
           <label key={g.id} style={{display:"flex",alignItems:"center",gap:5,fontSize:12,cursor:"pointer"}}>
             <input type="radio" name={"grp"+groupKey} checked={keepId===g.id} onChange={()=>setKeepId(g.id)}/>
-            <strong>{g.name}</strong>
-            <span style={{color:P.muted}}>({g.unit}{g.nameTamil?", "+g.nameTamil:""})</span>
+            <strong>{g.name||g.nameTamil}</strong>
+            <span style={{color:P.muted}}>({g.unit}{g.nameTamil&&g.name?", "+g.nameTamil:""})</span>
           </label>
         ))}
         <button style={{...css.btn("success",true),marginLeft:"auto"}} onClick={()=>mergeGroup(keepId,group)}>
@@ -2159,30 +2165,53 @@ function OrdersPage({ctx}){
   // before anything is actually written. Returns true to proceed, false to abort with
   // nothing created, so a wrong date range or location choice can be caught up front
   // instead of needing to manually delete a pile of orders afterward.
+  // Checks whether any (date, location, session) the operation is about to touch already
+  // has an existing order there, and asks what to do about it — rather than just warning
+  // and always adding alongside. Returns "overwrite", "add", or null (abort, nothing
+  // created). Uses two chained native confirms since a real 3-way choice needs it.
   const confirmDuplicate=(newOrders,summaryText)=>{
-    if(!newOrders.length)return false;
-    const conflictSet=new Set();
+    if(!newOrders.length)return null;
+    const conflictSet=new Set(); // "date|locId|session"
     newOrders.forEach(o=>{
-      const locIds=[...new Set((o.entries||[]).map(e=>e.locId))];
-      locIds.forEach(locId=>{
-        const exists=orders.some(ex=>!ex.isTemplate&&ex.date===o.date&&(ex.entries||[]).some(e=>e.locId===locId));
-        if(exists)conflictSet.add(o.date+"|"+locId);
+      (o.entries||[]).forEach(e=>{
+        const exists=orders.some(ex=>!ex.isTemplate&&ex.date===o.date&&(ex.entries||[]).some(ex2=>ex2.locId===e.locId&&ex2.session===e.session));
+        if(exists)conflictSet.add(o.date+"|"+e.locId+"|"+e.session);
       });
     });
-    let msg=summaryText;
-    if(conflictSet.size>0){
-      const sample=[...conflictSet].slice(0,6).map(k=>{
-        const[date,locId]=k.split("|");
-        const locName=locations.find(l=>l.id===+locId)?.name||"?";
-        return date+" - "+locName;
-      }).join(", ");
-      msg+="\n\n⚠️ "+t("Already has an order:","ஏற்கனவே ஆர்டர் உள்ளது:")+" "+conflictSet.size+" "+t("location/date combo(s):","இட/தேதி:")+"\n"+sample+
-        (conflictSet.size>6?" +"+(conflictSet.size-6)+" "+t("more","மேலும்"):"")+
-        "\n\n"+t("This will ADD alongside the existing order(s), not replace them.","இது ஏற்கனவே உள்ளதுடன் சேரும், மாற்றாது.")+" "+t("Continue?","தொடரவா?");
-    } else {
-      msg+="\n\n"+t("Continue?","தொடரவா?");
+    if(conflictSet.size===0){
+      return confirm(summaryText+"\n\n"+t("Continue?","தொடரவா?"))?"add":null;
     }
-    return confirm(msg);
+    const sample=[...conflictSet].slice(0,6).map(k=>{
+      const[date,locId,session]=k.split("|");
+      const locName=locations.find(l=>l.id===+locId)?.name||"?";
+      return date+" - "+locName+" ("+session+")";
+    }).join("\n");
+    const overwriteMsg=summaryText+"\n\n⚠️ "+t("Already has an order for the same location & session:","ஏற்கனவே அதே இடம் & அமர்வுக்கு ஆர்டர் உள்ளது:")+" ("+conflictSet.size+")\n"+sample+
+      (conflictSet.size>6?"\n+"+(conflictSet.size-6)+" "+t("more","மேலும்"):"")+
+      "\n\n"+t("Click OK to OVERWRITE the existing order(s) for those exact location/session combos, or Cancel to choose Add Alongside instead.","ஏற்கனவே உள்ளதை மாற்ற OK அழுத்தவும், அல்லது சேர்க்க Cancel அழுத்தவும்.");
+    if(confirm(overwriteMsg))return"overwrite";
+    const addMsg=t("Add these as new orders alongside the existing ones instead? This creates duplicates for the conflicting location/session combos.","இவற்றை ஏற்கனவே உள்ளதுடன் சேர்க்கவா? நகல்கள் உருவாகும்.")+"\n\n"+
+      t("Click OK to add anyway, or Cancel to abort completely — nothing will be created.","சேர்க்க OK, முழுமையாக ரத்து செய்ய Cancel.");
+    return confirm(addMsg)?"add":null;
+  };
+
+  // Applies the outcome from confirmDuplicate in one atomic update: if "overwrite", first
+  // strips out any existing entries at the exact (date, location, session) combos the new
+  // orders occupy — dropping any order left with zero entries — then adds the new orders.
+  const applyDuplicateResult=(newOrders,action)=>{
+    setOrders(prev=>{
+      let next=prev;
+      if(action==="overwrite"){
+        const targets=new Set();
+        newOrders.forEach(o=>(o.entries||[]).forEach(e=>targets.add(o.date+"|"+e.locId+"|"+e.session)));
+        next=next.map(ex=>{
+          if(ex.isTemplate)return ex;
+          const filtered=(ex.entries||[]).filter(e=>!targets.has(ex.date+"|"+e.locId+"|"+e.session));
+          return{...ex,entries:filtered};
+        }).filter(ex=>ex.isTemplate||ex.entries.length>0);
+      }
+      return[...next,...newOrders];
+    });
   };
 
   const duplicateDay=()=>{
@@ -2198,8 +2227,9 @@ function OrdersPage({ctx}){
       copies.push({...o,id:Date.now()+i,date:dupTo,name:o.name,entries:newEntries,costSnapshot:costOfEntries(newEntries)});
     });
     if(!copies.length){alert(t("No entries found for that date and session.","அந்த தேதி / அமர்வுக்கு பதிவுகள் இல்லை."));return;}
-    if(!confirmDuplicate(copies,copies.length+" "+t("order(s) will be created for","ஆர்டர்(கள்) உருவாக்கப்படும்")+" "+dupTo+(dupSess!=="All"?" ("+dupSess+")":"")+"."))return;
-    setOrders(p=>[...p,...copies]);
+    const action1=confirmDuplicate(copies,copies.length+" "+t("order(s) will be created for","ஆர்டர்(கள்) உருவாக்கப்படும்")+" "+dupTo+(dupSess!=="All"?" ("+dupSess+")":"")+".");
+    if(!action1)return;
+    applyDuplicateResult(copies,action1);
     setDupOpen(false);
   };
 
@@ -2233,8 +2263,9 @@ function OrdersPage({ctx}){
     }).filter(Boolean);
     if(!copies.length){alert(t("No entries matched the selected session/locations in that date range.","தேர்ந்த அமர்வு / இடங்களுக்கு பொருந்தும் பதிவுகள் இல்லை."));return;}
     const lastDate=copies.reduce((mx,c)=>c.date>mx?c.date:mx,copies[0].date);
-    if(!confirmDuplicate(copies,copies.length+" "+t("order(s) will be created, starting","ஆர்டர்(கள்) உருவாக்கப்படும், தொடங்கும்")+" "+dupRangeTarget+" ("+t("through","வரை")+" "+lastDate+")."))return;
-    setOrders(p=>[...p,...copies]);
+    const action2=confirmDuplicate(copies,copies.length+" "+t("order(s) will be created, starting","ஆர்டர்(கள்) உருவாக்கப்படும், தொடங்கும்")+" "+dupRangeTarget+" ("+t("through","வரை")+" "+lastDate+").");
+    if(!action2)return;
+    applyDuplicateResult(copies,action2);
     setDupOpen(false);
   };
 
@@ -2295,8 +2326,9 @@ function OrdersPage({ctx}){
     });
     if(!newOrders.length){alert(t("No entries found for that date, location, and session.","அந்த தேதி / இடம் / அமர்வுக்கு பதிவுகள் இல்லை."));return;}
     const targetNames=dupLocTargets.map(id=>locations.find(l=>l.id===id)?.name).filter(Boolean).join(", ");
-    if(!confirmDuplicate(newOrders,newOrders.length+" "+t("order(s) will be created for:","ஆர்டர்(கள்) உருவாக்கப்படும்:")+" "+targetNames+"."))return;
-    setOrders(p=>[...p,...newOrders]);
+    const action3=confirmDuplicate(newOrders,newOrders.length+" "+t("order(s) will be created for:","ஆர்டர்(கள்) உருவாக்கப்படும்:")+" "+targetNames+".");
+    if(!action3)return;
+    applyDuplicateResult(newOrders,action3);
     setDupOpen(false);
     setDupLocTargets([]);
     setDupLocTargetPax({});
@@ -2348,8 +2380,9 @@ function OrdersPage({ctx}){
     if(!newOrders.length){alert(t("No entries found for that date range, location, and session.","அந்த தேதி வரம்பு / இடம் / அமர்வுக்கு பதிவுகள் இல்லை."));return;}
     const targetNames=dupR2LTargets.map(id=>locations.find(l=>l.id===id)?.name).filter(Boolean).join(", ");
     const dayCount=[...new Set(sourceOrders.map(o=>o.date))].length;
-    if(!confirmDuplicate(newOrders,newOrders.length+" "+t("order(s) will be created across","ஆர்டர்(கள்) உருவாக்கப்படும்")+" "+dayCount+" "+t("day(s) for:","நாட்களுக்கு:")+" "+targetNames+"."))return;
-    setOrders(p=>[...p,...newOrders]);
+    const action4=confirmDuplicate(newOrders,newOrders.length+" "+t("order(s) will be created across","ஆர்டர்(கள்) உருவாக்கப்படும்")+" "+dayCount+" "+t("day(s) for:","நாட்களுக்கு:")+" "+targetNames+".");
+    if(!action4)return;
+    applyDuplicateResult(newOrders,action4);
     setDupOpen(false);
     setDupR2LTargets([]);
     setDupR2LTargetPax({});
@@ -2378,8 +2411,9 @@ function OrdersPage({ctx}){
     }
     if(!newOrders.length){alert(t("No entries found for that date, location, and session.","அந்த தேதி / இடம் / அமர்வுக்கு பதிவுகள் இல்லை."));return;}
     const endDate=new Date(dupRepStart); endDate.setDate(endDate.getDate()+days-1);
-    if(!confirmDuplicate(newOrders,newOrders.length+" "+t("order(s) will be created,","ஆர்டர்(கள்) உருவாக்கப்படும்,")+" "+dupRepStart+" "+t("through","வரை")+" "+endDate.toISOString().slice(0,10)+"."))return;
-    setOrders(p=>[...p,...newOrders]);
+    const action5=confirmDuplicate(newOrders,newOrders.length+" "+t("order(s) will be created,","ஆர்டர்(கள்) உருவாக்கப்படும்,")+" "+dupRepStart+" "+t("through","வரை")+" "+endDate.toISOString().slice(0,10)+".");
+    if(!action5)return;
+    applyDuplicateResult(newOrders,action5);
     setDupOpen(false);
   };
 
@@ -3093,6 +3127,18 @@ function OrderForm({ctx,ord,onClose}){
     if(!ne.recId){setEntryErr(t("Select a recipe","சமையல் தேர்வு செய்யவும்"));return;}
     if(!ne.qty||+ne.qty<=0){setEntryErr(t("Enter a valid quantity","அளவு கொடுக்கவும்"));return;}
     if(!f.name){setEntryErr(t("Enter an order name first","முதலில் ஆர்டர் பெயரை உள்ளிடவும்"));return;}
+    // Warn if this is the first entry going into a brand-new order, and another order
+    // already covers the exact same date+location+session — easy to do by accident when
+    // creating a fresh order instead of editing the existing one.
+    if(!f.isTemplate&&f.entries.length===0){
+      const existing=orders.find(ex=>!ex.isTemplate&&ex.id!==savedId&&ex.date===f.date&&(ex.entries||[]).some(e=>e.locId===+defLocId&&e.session===defSession));
+      if(existing){
+        const locName=locations.find(l=>l.id===+defLocId)?.name||"";
+        const proceed=confirm(t("An order already exists for this date, location, and session:","இந்த தேதி/இடம்/அமர்வுக்கு ஏற்கனவே ஆர்டர் உள்ளது:")+" \""+existing.name+"\" ("+locName+", "+defSession+", "+f.date+").\n\n"+
+          t("Click OK to create this as a separate order anyway, or Cancel to go edit the existing one instead.","இருந்தாலும் தனி ஆர்டராக உருவாக்க OK, ஏற்கனவே உள்ளதை திருத்த Cancel."));
+        if(!proceed)return;
+      }
+    }
     setEntryErr("");
     const rec=recipes.find(r=>r.id===+ne.recId);
     const curPax=f.pax&&+f.pax>0?+f.pax:null;
@@ -3625,6 +3671,8 @@ function RepShop({ctx}){
   const [toDate,setToDate]=useState(TODAY);
   const [locFilter,setLocFilter]=useState([]); // empty = all locations
   const toggleLocFilter=id=>setLocFilter(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+  const [catFilter,setCatFilter]=useState([]); // empty = all categories
+  const toggleCatFilter=c=>setCatFilter(p=>p.includes(c)?p.filter(x=>x!==c):[...p,c]);
   const selectedLocLabel=!locFilter.length
     ?t("All Locations","அனைத்து இடங்கள்")
     :locFilter.map(id=>locations.find(l=>l.id===id)).filter(Boolean).map(l=>rLang==="en"?l.name:l.nameTamil).join(", ");
@@ -3636,6 +3684,7 @@ function RepShop({ctx}){
     const n=(ing.name||"").toLowerCase().trim();
     if(EXCLUDE_NAMES.includes(n))return true;
     if(EXCLUDE_PREFIXES.some(p=>ing.name.startsWith(p)))return true;
+    if(catFilter.length&&!catFilter.includes(ing.category))return true;
     return false;
   };
 
@@ -3915,6 +3964,20 @@ function RepShop({ctx}){
           ))}
         </div>
       )}
+
+      {/* Category filter */}
+      <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+        <span style={{fontSize:11,color:P.muted,marginRight:2}}>{t("Categories:","வகைகள்:")}</span>
+        <button style={css.btn(catFilter.length===0?"primary":"ghost",true)} onClick={()=>setCatFilter([])}>{t("All","அனைத்தும்")}</button>
+        {CATS.map(c=>(
+          <label key={c} style={{display:"flex",alignItems:"center",gap:4,fontSize:12,cursor:"pointer",
+            background:catFilter.includes(c)?P.saffron+"22":"transparent",
+            border:"1px solid "+(catFilter.includes(c)?P.saffron:"#DCC88A"),borderRadius:7,padding:"4px 9px"}}>
+            <input type="checkbox" checked={catFilter.includes(c)} onChange={()=>toggleCatFilter(c)}/>
+            {CATICON[c]} {t(CATLABEL[c],CATLABEL[c])}
+          </label>
+        ))}
+      </div>
 
       {/* Session tabs */}
       <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
