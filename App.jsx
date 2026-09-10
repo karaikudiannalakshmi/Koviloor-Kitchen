@@ -3887,8 +3887,8 @@ function RepShop({ctx}){
   // Active session tab
   const [activeTab,setActiveTab]=useState("All");
   const [viewMode,setViewMode]=useState("date"); // "date" | "location"
-  const {byDate,combined,allIngs}=useMemo(()=>buildData(activeTab),[activeTab,sortedDates,orders,recipes,ingredients,locFilter]);
-  const {byLoc,locCols,allIngs:locAllIngs}=useMemo(()=>buildLocationData(activeTab),[activeTab,sortedDates,orders,recipes,ingredients,locFilter]);
+  const {byDate,combined,allIngs}=useMemo(()=>buildData(activeTab),[activeTab,sortedDates,orders,recipes,ingredients,locFilter,catFilter]);
+  const {byLoc,locCols,allIngs:locAllIngs}=useMemo(()=>buildLocationData(activeTab),[activeTab,sortedDates,orders,recipes,ingredients,locFilter,catFilter]);
   const hasData=viewMode==="date"?allIngs.length>0:locAllIngs.length>0;
 
   const doLocExport=()=>{
