@@ -2014,6 +2014,11 @@ function OrdersPage({ctx}){
   const [dateQ,setDateQ]=useState("");
   const [nameQ,setNameQ]=useState("");
   const [dupOpen,setDupOpen]=useState(false);
+  const [bulkDelOpen,setBulkDelOpen]=useState(false);
+  const [bulkDelLocId,setBulkDelLocId]=useState("");
+  const [bulkDelFrom,setBulkDelFrom]=useState("");
+  const [bulkDelTo,setBulkDelTo]=useState("");
+  const [bulkDelSess,setBulkDelSess]=useState("All");
   const [dupMode,setDupMode]=useState("day"); // "day" | "range" | "loc" | "rangeLoc" | "repeat"
   const [dupFrom,setDupFrom]=useState(TODAY);
   const [dupTo,setDupTo]=useState(TODAY);
@@ -2212,6 +2217,53 @@ function OrdersPage({ctx}){
       }
       return[...next,...newOrders];
     });
+  };
+
+  // Removes every entry matching the chosen location (and optional date range / session)
+  // across all orders — not whole orders outright, since one order can span multiple
+  // locations. Any order left with zero entries afterward is dropped entirely.
+  const bulkDeleteMatchCount=()=>{
+    if(!bulkDelLocId)return{orderCount:0,entryCount:0};
+    const locId=+bulkDelLocId;
+    let entryCount=0; const affectedOrderIds=new Set();
+    orders.forEach(o=>{
+      if(o.isTemplate)return;
+      if(bulkDelFrom&&o.date<bulkDelFrom)return;
+      if(bulkDelTo&&o.date>bulkDelTo)return;
+      (o.entries||[]).forEach(e=>{
+        if(e.locId===locId&&(bulkDelSess==="All"||e.session===bulkDelSess)){
+          entryCount++;
+          affectedOrderIds.add(o.id);
+        }
+      });
+    });
+    return{orderCount:affectedOrderIds.size,entryCount};
+  };
+
+  const bulkDeleteLocationOrders=()=>{
+    if(!bulkDelLocId){alert(t("Select a location.","இடத்தை தேர்வு செய்யவும்."));return;}
+    const locId=+bulkDelLocId;
+    const locName=locations.find(l=>l.id===locId)?.name||"?";
+    const{orderCount,entryCount}=bulkDeleteMatchCount();
+    if(!entryCount){alert(t("No matching entries found.","பொருந்தும் பதிவுகள் இல்லை."));return;}
+    const rangeLabel=(bulkDelFrom||bulkDelTo)?" ("+(bulkDelFrom||"...")+" – "+(bulkDelTo||"...")+")":" ("+t("all dates","அனைத்து தேதிகள்")+")";
+    const sessLabel=bulkDelSess!=="All"?" — "+bulkDelSess:"";
+    const ok=confirm(
+      t("This will permanently remove","இது நிரந்தரமாக நீக்கும்")+" "+entryCount+" "+t("item entries across","பொருள் பதிவுகளை")+" "+orderCount+" "+t("order(s) for","ஆர்டர்(கள்)")+" "+locName+sessLabel+rangeLabel+".\n\n"+
+      t("Orders left with no other items will be deleted entirely. This cannot be undone.","வேறு பொருள் இல்லாத ஆர்டர்கள் முழுவதுமாக நீக்கப்படும். இதை மீட்க முடியாது.")+"\n\n"+
+      t("Continue?","தொடரவா?")
+    );
+    if(!ok)return;
+    setOrders(prev=>prev.map(o=>{
+      if(o.isTemplate)return o;
+      if(bulkDelFrom&&o.date<bulkDelFrom)return o;
+      if(bulkDelTo&&o.date>bulkDelTo)return o;
+      const filtered=(o.entries||[]).filter(e=>!(e.locId===locId&&(bulkDelSess==="All"||e.session===bulkDelSess)));
+      return{...o,entries:filtered};
+    }).filter(o=>o.isTemplate||o.entries.length>0));
+    setBulkDelOpen(false);
+    setBulkDelLocId("");
+    alert(entryCount+" "+t("entries removed,","பதிவுகள் நீக்கப்பட்டன,")+" "+orderCount+" "+t("order(s) affected.","ஆர்டர்கள் பாதிக்கப்பட்டன."));
   };
 
   const duplicateDay=()=>{
@@ -2423,6 +2475,7 @@ function OrdersPage({ctx}){
         <button data-tour="new-order" style={css.btn()} onClick={()=>setModal({type:"order"})}>+ {t("New Order","புதிய ஆர்டர்")}</button>
         <button style={css.btn("ghost")} onClick={()=>setModal({type:"addLoc"})}>📍 {t("Add Location","இடம் சேர்")}</button>
         <button data-tour="duplicate-day" style={css.btn(dupOpen?"primary":"ghost")} onClick={()=>setDupOpen(!dupOpen)}>📅 {t("Duplicate Day","நாள் நகலெடு")}</button>
+        <button style={css.btn(bulkDelOpen?"danger":"ghost")} onClick={()=>setBulkDelOpen(!bulkDelOpen)}>🗑 {t("Delete by Location","இடம் வாரியாக நீக்கு")}</button>
         <button style={css.btn("ghost")} onClick={downloadMenuTemplate}>📋 {t("Menu Template","உணவு டெம்ப்ளேட்")}</button>
         <button style={css.btn("success")} onClick={()=>importFileRef.current.click()}>📤 {t("Import Menu (Excel)","உணவு இறக்கு")}</button>
         <input ref={importFileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importMenuXlsx}/>
@@ -2749,6 +2802,55 @@ function OrdersPage({ctx}){
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {bulkDelOpen&&(
+        <div style={{background:"#FEF2F2",padding:12,borderRadius:8,marginBottom:14,border:"1px solid #FCA5A5"}}>
+          <div style={{fontSize:12,color:"#991B1B",marginBottom:10,fontWeight:600}}>
+            ⚠️ {t("Removes items for a location from every matching order — orders left with nothing else in them are deleted entirely. This cannot be undone.","ஒரு இடத்திற்கான பொருட்களை எல்லா ஆர்டர்களிலிருந்தும் நீக்கும் — வேறு பொருள் இல்லாத ஆர்டர்கள் முழுவதுமாக நீக்கப்படும். இதை மீட்க முடியாது.")}
+          </div>
+          <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap",marginBottom:10}}>
+            <div>
+              <label style={css.lbl}>{t("Location","இடம்")}</label>
+              <select style={{...css.sel,minWidth:200}} value={bulkDelLocId} onChange={e=>setBulkDelLocId(e.target.value)}>
+                <option value="">{t("Select...","தேர்வு...")}</option>
+                {locations.map(l=><option key={l.id} value={l.id}>{lang==="en"?l.name:l.nameTamil}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={css.lbl}>{t("From (optional)","இருந்து (விருப்பம்)")}</label>
+              <input type="date" style={{...css.inp,width:150}} value={bulkDelFrom} onChange={e=>setBulkDelFrom(e.target.value)}/>
+            </div>
+            <div>
+              <label style={css.lbl}>{t("To (optional)","வரை (விருப்பம்)")}</label>
+              <input type="date" style={{...css.inp,width:150}} value={bulkDelTo} onChange={e=>setBulkDelTo(e.target.value)}/>
+            </div>
+          </div>
+          <div style={{marginBottom:10}}>
+            <label style={css.lbl}>{t("Session","அமர்வு")}</label>
+            <div style={{display:"flex",gap:4}}>
+              {["All",...SESSIONS].map(s=>(
+                <button key={s} style={{...css.btn(bulkDelSess===s?"primary":"ghost",true),
+                  borderColor:s!=="All"?(SCOLOR[s]||P.muted):"#DCC88A",
+                  color:bulkDelSess===s?"white":(s!=="All"?SCOLOR[s]:P.deepBrown),
+                  background:bulkDelSess===s?(SCOLOR[s]||P.saffron):"transparent",
+                }} onClick={()=>setBulkDelSess(s)}>{s==="All"?t("All","அனைத்தும்"):s}</button>
+              ))}
+            </div>
+          </div>
+          {bulkDelLocId&&(()=>{
+            const{orderCount,entryCount}=bulkDeleteMatchCount();
+            return(
+              <div style={{fontSize:12,color:entryCount?"#991B1B":P.muted,marginBottom:10,fontWeight:600}}>
+                {entryCount?entryCount+" "+t("entries across","பதிவுகள்")+" "+orderCount+" "+t("order(s) match this selection.","ஆர்டர்கள் பொருந்துகின்றன."):t("No matching entries.","பொருந்தும் பதிவுகள் இல்லை.")}
+              </div>
+            );
+          })()}
+          <div style={{display:"flex",gap:8}}>
+            <button style={css.btn("danger")} onClick={bulkDeleteLocationOrders} disabled={!bulkDelLocId}>🗑 {t("Delete Matching Entries","பொருந்தும் பதிவுகளை நீக்கு")}</button>
+            <button style={css.btn("ghost")} onClick={()=>setBulkDelOpen(false)}>{t("Cancel","ரத்து")}</button>
+          </div>
         </div>
       )}
 
