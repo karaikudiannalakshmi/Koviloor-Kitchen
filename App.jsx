@@ -3229,18 +3229,6 @@ function OrderForm({ctx,ord,onClose}){
     if(!ne.recId){setEntryErr(t("Select a recipe","சமையல் தேர்வு செய்யவும்"));return;}
     if(!ne.qty||+ne.qty<=0){setEntryErr(t("Enter a valid quantity","அளவு கொடுக்கவும்"));return;}
     if(!f.name){setEntryErr(t("Enter an order name first","முதலில் ஆர்டர் பெயரை உள்ளிடவும்"));return;}
-    // Warn if this is the first entry going into a brand-new order, and another order
-    // already covers the exact same date+location+session — easy to do by accident when
-    // creating a fresh order instead of editing the existing one.
-    if(!f.isTemplate&&f.entries.length===0){
-      const existing=orders.find(ex=>!ex.isTemplate&&ex.id!==savedId&&ex.date===f.date&&(ex.entries||[]).some(e=>e.locId===+defLocId&&e.session===defSession));
-      if(existing){
-        const locName=locations.find(l=>l.id===+defLocId)?.name||"";
-        const proceed=confirm(t("An order already exists for this date, location, and session:","இந்த தேதி/இடம்/அமர்வுக்கு ஏற்கனவே ஆர்டர் உள்ளது:")+" \""+existing.name+"\" ("+locName+", "+defSession+", "+f.date+").\n\n"+
-          t("Click OK to create this as a separate order anyway, or Cancel to go edit the existing one instead.","இருந்தாலும் தனி ஆர்டராக உருவாக்க OK, ஏற்கனவே உள்ளதை திருத்த Cancel."));
-        if(!proceed)return;
-      }
-    }
     setEntryErr("");
     const rec=recipes.find(r=>r.id===+ne.recId);
     const curPax=f.pax&&+f.pax>0?+f.pax:null;
