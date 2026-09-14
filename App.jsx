@@ -353,6 +353,49 @@ function matchLocDefault(loc,rec){
   return best;
 }
 
+// Computes Pooja Material demand per date — same logic as the Pooja Shopping List
+// report (temple weekly + monthly recurring schedule, plus any Temple Occasion orders
+// like Ashtami/Sashti/Moolam that fall in range) — but returned per-date so it can be
+// merged into the Kitchen Shopping List's own per-date structure.
+function computePoojaDemandByDate(poojaTemples,poojaItems,occOrders,sortedDates){
+  const DAYS=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+  const byDate={};
+  sortedDates.forEach(dt=>{
+    byDate[dt]={};
+    const dow=DAYS[new Date(dt).getDay()];
+    const dom=String(new Date(dt).getDate());
+    poojaTemples.forEach(tm=>{
+      poojaItems.forEach(pi=>{
+        const wk=tm.schedule?.[pi.id]?.[dow]||{};
+        const mo=tm.monthlySchedule?.[pi.id]?.[dom]||{};
+        const sum=(+wk.morning||0)+(+wk.afternoon||0)+(+wk.evening||0)
+                 +(+mo.morning||0)+(+mo.afternoon||0)+(+mo.evening||0);
+        if(!sum)return;
+        byDate[dt][pi.id]=(byDate[dt][pi.id]||0)+sum;
+      });
+    });
+    occOrders.filter(o=>o.date===dt).forEach(o=>{
+      (o.items||[]).forEach(it=>{
+        byDate[dt][it.itemId]=(byDate[dt][it.itemId]||0)+(+it.qty||0);
+      });
+    });
+  });
+  return byDate;
+}
+
+// Matches a Pooja Item to a Kitchen ingredient by exact name (English or Tamil) — these
+// are two separate master lists, so only items that are genuinely the same thing under
+// the same name merge together; anything with no match is left out rather than guessed.
+function matchPoojaToIngredient(pi,ingredients){
+  const nameLC=(pi.name||"").toLowerCase().trim();
+  const tamilLC=(pi.nameTamil||"").toLowerCase().trim();
+  return ingredients.find(ing=>{
+    const iNameLC=(ing.name||"").toLowerCase().trim();
+    const iTamilLC=(ing.nameTamil||"").toLowerCase().trim();
+    return(nameLC&&iNameLC===nameLC)||(tamilLC&&iTamilLC===tamilLC);
+  });
+}
+
 // Parses a worksheet into row objects, auto-detecting which row is the real header row —
 // several of this app's own exports (Purchase Order, Shopping List) prepend a banner row
 // like "Locations: All Locations | Dates: ..." above the actual column headers, which
@@ -3753,19 +3796,24 @@ function RepIng({ctx}){
 // REPORT: SHOPPING LIST
 // ════════════════════════════════════════════════════════════════════
 function RepShop({ctx}){
-  const {orders,recipes,ingredients,inventory,locations,lang:gLang}=ctx;
+  const {orders,recipes,ingredients,inventory,locations,poojaItems,poojaTemples,occOrders,lang:gLang}=ctx;
   const [rLang,setRLang]=useState(gLang);
   const t=(en,ta)=>rLang==="en"?en:ta;
   const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
   const [fromDate,setFromDate]=useState(TODAY);
   const [toDate,setToDate]=useState(TODAY);
-  const [locFilter,setLocFilter]=useState([]); // empty = all locations
+  const [locFilter,setLocFilter]=useState([]); // empty = all locations; may also hold "pooja"
   const toggleLocFilter=id=>setLocFilter(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
   const [catFilter,setCatFilter]=useState([]); // empty = all categories
   const toggleCatFilter=c=>setCatFilter(p=>p.includes(c)?p.filter(x=>x!==c):[...p,c]);
+  // Pooja Material (temple schedules + Temple Occasion orders) is treated as one virtual
+  // location, included by default alongside every real kitchen location — same as any
+  // other location, it drops out once you narrow the filter to specific locations unless
+  // it's explicitly checked back in.
+  const includePooja=!locFilter.length||locFilter.includes("pooja");
   const selectedLocLabel=!locFilter.length
     ?t("All Locations","அனைத்து இடங்கள்")
-    :locFilter.map(id=>locations.find(l=>l.id===id)).filter(Boolean).map(l=>rLang==="en"?l.name:l.nameTamil).join(", ");
+    :locFilter.map(id=>id==="pooja"?t("Pooja Material","பூஜை பொருள்"):(locations.find(l=>l.id===id)?(rLang==="en"?locations.find(l=>l.id===id).name:locations.find(l=>l.id===id).nameTamil):null)).filter(Boolean).join(", ");
   // Ingredients to exclude from purchase order (AC pre-cut veg, Milk, derived/intermediate items, etc.)
   const EXCLUDE_PREFIXES=["AC ","AC-"];
   const EXCLUDE_NAMES=["milk","milk- milk","water for dal","water","tamarind juice","tomato juice","mavu-arisi mavu weight","mavu-ulunthu mavu wt"];
@@ -3812,6 +3860,7 @@ function RepShop({ctx}){
   };
   const buildData=(sessFilter)=>{
     const byDate={};
+    const poojaByDate=includePooja?computePoojaDemandByDate(poojaTemples,poojaItems,occOrders,sortedDates):{};
     sortedDates.forEach(dt=>{
       byDate[dt]={};
       const ents=orders.filter(o=>!o.isTemplate&&o.date===dt)
@@ -3824,6 +3873,20 @@ function RepShop({ctx}){
         if(!byDate[dt][id])byDate[dt][id]={d:r.d,qty:0,unit:baseUnit};
         byDate[dt][id].qty+=cvtUnit(r.qty,r.unit,baseUnit);
       });
+      // Merge in Pooja Material demand for this date — only items that match an existing
+      // kitchen ingredient by name get folded in; anything with no match is skipped rather
+      // than guessed at, since Pooja Items and Kitchen Ingredients are separate lists.
+      if(includePooja){
+        Object.entries(poojaByDate[dt]||{}).forEach(([itemIdStr,qty])=>{
+          const pi=poojaItems.find(x=>x.id===+itemIdStr);
+          if(!pi)return;
+          const ing=matchPoojaToIngredient(pi,ingredients);
+          if(!ing||isExcluded(ing))return;
+          const baseUnit=ing.unit;
+          if(!byDate[dt][ing.id])byDate[dt][ing.id]={d:ing,qty:0,unit:baseUnit};
+          byDate[dt][ing.id].qty+=cvtUnit(qty,pi.unit,baseUnit);
+        });
+      }
     });
     const combined={};
     sortedDates.forEach(dt=>{
@@ -3862,7 +3925,26 @@ function RepShop({ctx}){
         });
       });
     });
-    const locCols=locations.filter(l=>usedLocIds.has(l.id));
+    // Fold in Pooja Material as its own virtual "location" column, matched by name.
+    if(includePooja){
+      const poojaByDate=computePoojaDemandByDate(poojaTemples,poojaItems,occOrders,sortedDates);
+      sortedDates.forEach(dt=>{
+        Object.entries(poojaByDate[dt]||{}).forEach(([itemIdStr,qty])=>{
+          const pi=poojaItems.find(x=>x.id===+itemIdStr);
+          if(!pi)return;
+          const ing=matchPoojaToIngredient(pi,ingredients);
+          if(!ing||isExcluded(ing))return;
+          const baseUnit=ing.unit;
+          if(!byLocRaw[ing.id])byLocRaw[ing.id]={};
+          byLocRaw[ing.id]["pooja"]=(byLocRaw[ing.id]["pooja"]||0)+cvtUnit(qty,pi.unit,baseUnit);
+          usedLocIds.add("pooja");
+        });
+      });
+    }
+    const locCols=[
+      ...locations.filter(l=>usedLocIds.has(l.id)),
+      ...(usedLocIds.has("pooja")?[{id:"pooja",name:t("Pooja Material","பூஜை பொருள்"),nameTamil:t("Pooja Material","பூஜை பொருள்")}]:[]),
+    ];
     const allIngIds=Object.keys(byLocRaw).map(Number);
     const allIngs=allIngIds
       .map(id=>ingredients.find(x=>x.id===id)).filter(Boolean)
@@ -3977,8 +4059,8 @@ function RepShop({ctx}){
   // Active session tab
   const [activeTab,setActiveTab]=useState("All");
   const [viewMode,setViewMode]=useState("date"); // "date" | "location"
-  const {byDate,combined,allIngs}=useMemo(()=>buildData(activeTab),[activeTab,sortedDates,orders,recipes,ingredients,locFilter,catFilter]);
-  const {byLoc,locCols,allIngs:locAllIngs}=useMemo(()=>buildLocationData(activeTab),[activeTab,sortedDates,orders,recipes,ingredients,locFilter,catFilter]);
+  const {byDate,combined,allIngs}=useMemo(()=>buildData(activeTab),[activeTab,sortedDates,orders,recipes,ingredients,locFilter,catFilter,includePooja,poojaItems,poojaTemples,occOrders]);
+  const {byLoc,locCols,allIngs:locAllIngs}=useMemo(()=>buildLocationData(activeTab),[activeTab,sortedDates,orders,recipes,ingredients,locFilter,catFilter,includePooja,poojaItems,poojaTemples,occOrders]);
   const hasData=viewMode==="date"?allIngs.length>0:locAllIngs.length>0;
 
   const doLocExport=()=>{
@@ -4040,7 +4122,7 @@ function RepShop({ctx}){
       </ReportBar>
 
       {/* Location filter */}
-      {locations.length>0&&(
+      {(locations.length>0||true)&&(
         <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
           <span style={{fontSize:11,color:P.muted,marginRight:2}}>{t("Locations:","இடங்கள்:")}</span>
           <button style={css.btn(locFilter.length===0?"primary":"ghost",true)} onClick={()=>setLocFilter([])}>{t("All","அனைத்தும்")}</button>
@@ -4052,6 +4134,12 @@ function RepShop({ctx}){
               {rLang==="en"?l.name:l.nameTamil}
             </label>
           ))}
+          <label style={{display:"flex",alignItems:"center",gap:4,fontSize:12,cursor:"pointer",
+            background:locFilter.includes("pooja")?P.purple+"22":"transparent",
+            border:"1px solid "+(locFilter.includes("pooja")?P.purple:"#DCC88A"),borderRadius:7,padding:"4px 9px"}}>
+            <input type="checkbox" checked={locFilter.includes("pooja")} onChange={()=>toggleLocFilter("pooja")}/>
+            🕉️ {t("Pooja Material","பூஜை பொருள்")}
+          </label>
         </div>
       )}
 
