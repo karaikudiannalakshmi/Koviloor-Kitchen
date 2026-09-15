@@ -396,6 +396,24 @@ function matchPoojaToIngredient(pi,ingredients){
   });
 }
 
+// Only Milk and Curd are the same physical purchase whether bought for the kitchen or for
+// pooja, so only those two merge into the matching kitchen ingredient. Everything else
+// (Coconut, Banana, Betel leaf, Areca nut, etc.) is kept as its own separate shopping-list
+// line item even when a same-named kitchen ingredient exists — e.g. a whole pooja coconut
+// is a different purchase from kitchen-use coconut, and must not be silently combined.
+const POOJA_MERGE_NAMES=["milk","curd"];
+function resolvePoojaItemTarget(pi,ingredients){
+  const nameLC=(pi.name||"").toLowerCase().trim();
+  if(POOJA_MERGE_NAMES.includes(nameLC)){
+    const ing=matchPoojaToIngredient(pi,ingredients);
+    if(ing)return ing;
+  }
+  // Synthetic line item — string id keeps it from ever colliding with a real numeric
+  // ingredient id, and "pooja" as its category exempts it from the Grocery/Spice/
+  // Vegetable/Other category filter, which doesn't meaningfully apply to it.
+  return{id:"pooja_"+pi.id,name:pi.name,nameTamil:pi.nameTamil,unit:pi.unit,category:"pooja",excludeFromShopping:false};
+}
+
 // Parses a worksheet into row objects, auto-detecting which row is the real header row —
 // several of this app's own exports (Purchase Order, Shopping List) prepend a banner row
 // like "Locations: All Locations | Dates: ..." above the actual column headers, which
@@ -3818,6 +3836,7 @@ function RepShop({ctx}){
   const EXCLUDE_PREFIXES=["AC ","AC-"];
   const EXCLUDE_NAMES=["milk","milk- milk","water for dal","water","tamarind juice","tomato juice","mavu-arisi mavu weight","mavu-ulunthu mavu wt"];
   const isExcluded=(ing)=>{
+    if(ing.category==="pooja")return ing.excludeFromShopping||false; // exempt from grocery/spice/veg/other filtering
     if(ing.excludeFromShopping)return true;
     const n=(ing.name||"").toLowerCase().trim();
     if(EXCLUDE_NAMES.includes(n))return true;
@@ -3840,10 +3859,14 @@ function RepShop({ctx}){
     return bought-used;
   };
 
-  // Category order: grocery first, then spice, then vegetable, then other
+  // Category order: grocery first, then spice, then vegetable, then other.
+  // CATS drives the Categories filter checkboxes (Pooja Material is controlled by the
+  // Locations filter instead, so it's deliberately not one of these). DISPLAY_CATS adds
+  // it on top, purely for grouping/sorting the actual rendered sections.
   const CATS=["grocery","spice","vegetable","other"];
-  const CATICON={grocery:"🛒",spice:"🌶️",vegetable:"🥬",other:"📦"};
-  const CATLABEL={grocery:"Grocery",spice:"Spice",vegetable:"Vegetable",other:"Other"};
+  const CATICON={grocery:"🛒",spice:"🌶️",vegetable:"🥬",other:"📦",pooja:"🕉️"};
+  const CATLABEL={grocery:"Grocery",spice:"Spice",vegetable:"Vegetable",other:"Other",pooja:"Pooja Material"};
+  const DISPLAY_CATS=[...CATS,"pooja"];
 
   // Build data per session filter + "All"
   const SESSION_OPTS=["All",...SESSIONS];
@@ -3873,18 +3896,19 @@ function RepShop({ctx}){
         if(!byDate[dt][id])byDate[dt][id]={d:r.d,qty:0,unit:baseUnit};
         byDate[dt][id].qty+=cvtUnit(r.qty,r.unit,baseUnit);
       });
-      // Merge in Pooja Material demand for this date — only items that match an existing
-      // kitchen ingredient by name get folded in; anything with no match is skipped rather
-      // than guessed at, since Pooja Items and Kitchen Ingredients are separate lists.
+      // Merge in Pooja Material demand for this date. Only Milk and Curd merge into the
+      // matching kitchen ingredient by name — everything else stays as its own separate
+      // line item even when a same-named kitchen ingredient exists (e.g. Pooja Coconut
+      // is a physically different purchase from Kitchen Coconut, so it must not merge).
       if(includePooja){
         Object.entries(poojaByDate[dt]||{}).forEach(([itemIdStr,qty])=>{
           const pi=poojaItems.find(x=>x.id===+itemIdStr);
           if(!pi)return;
-          const ing=matchPoojaToIngredient(pi,ingredients);
-          if(!ing||isExcluded(ing))return;
-          const baseUnit=ing.unit;
-          if(!byDate[dt][ing.id])byDate[dt][ing.id]={d:ing,qty:0,unit:baseUnit};
-          byDate[dt][ing.id].qty+=cvtUnit(qty,pi.unit,baseUnit);
+          const target=resolvePoojaItemTarget(pi,ingredients);
+          if(!target||isExcluded(target))return;
+          const baseUnit=target.unit;
+          if(!byDate[dt][target.id])byDate[dt][target.id]={d:target,qty:0,unit:baseUnit};
+          byDate[dt][target.id].qty+=cvtUnit(qty,pi.unit,baseUnit);
         });
       }
     });
@@ -3895,17 +3919,22 @@ function RepShop({ctx}){
         combined[r.d.id].qty+=cvtUnit(r.qty,r.unit,combined[r.d.id].unit);
       });
     });
-    const allIngIds=[...new Set(sortedDates.flatMap(dt=>Object.keys(byDate[dt]).map(Number)))];
-    const allIngs=allIngIds
-      .map(id=>ingredients.find(x=>x.id===id)).filter(Boolean)
+    // Pull the actual stored ingredient (or synthetic Pooja item) objects directly from
+    // byDate rather than re-looking them up by numeric id — a synthetic Pooja line item's
+    // id is a string ("pooja_5"), which a numeric re-lookup against the real ingredients
+    // list would silently drop.
+    const byId={};
+    sortedDates.forEach(dt=>Object.values(byDate[dt]).forEach(r=>{byId[r.d.id]=r.d;}));
+    const allIngs=Object.values(byId)
       .filter(ing=>!isExcluded(ing))
-      .sort((a,b)=>CATS.indexOf(a.category)-CATS.indexOf(b.category)||a.name.localeCompare(b.name));
+      .sort((a,b)=>DISPLAY_CATS.indexOf(a.category)-DISPLAY_CATS.indexOf(b.category)||a.name.localeCompare(b.name));
     return {byDate,combined,allIngs};
   };
 
   // Location-columnar breakdown: one column per location, summed across the whole date range
   const buildLocationData=(sessFilter)=>{
     const byLocRaw={}; // ingId -> { locId: qty }
+    const byIdMeta={}; // ingId -> the actual ingredient (or synthetic Pooja item) object
     const usedLocIds=new Set();
     sortedDates.forEach(dt=>{
       const ents=orders.filter(o=>!o.isTemplate&&o.date===dt)
@@ -3921,22 +3950,26 @@ function RepShop({ctx}){
           const qty=cvtUnit(r.qty,r.unit,baseUnit);
           if(!byLocRaw[r.d.id])byLocRaw[r.d.id]={};
           byLocRaw[r.d.id][locId]=(byLocRaw[r.d.id][locId]||0)+qty;
+          byIdMeta[r.d.id]=r.d;
           usedLocIds.add(locId);
         });
       });
     });
-    // Fold in Pooja Material as its own virtual "location" column, matched by name.
+    // Fold in Pooja Material as its own virtual "location" column. Only Milk and Curd
+    // merge into the matching kitchen ingredient by name — everything else stays as its
+    // own separate line item even when a same-named kitchen ingredient exists.
     if(includePooja){
       const poojaByDate=computePoojaDemandByDate(poojaTemples,poojaItems,occOrders,sortedDates);
       sortedDates.forEach(dt=>{
         Object.entries(poojaByDate[dt]||{}).forEach(([itemIdStr,qty])=>{
           const pi=poojaItems.find(x=>x.id===+itemIdStr);
           if(!pi)return;
-          const ing=matchPoojaToIngredient(pi,ingredients);
-          if(!ing||isExcluded(ing))return;
-          const baseUnit=ing.unit;
-          if(!byLocRaw[ing.id])byLocRaw[ing.id]={};
-          byLocRaw[ing.id]["pooja"]=(byLocRaw[ing.id]["pooja"]||0)+cvtUnit(qty,pi.unit,baseUnit);
+          const target=resolvePoojaItemTarget(pi,ingredients);
+          if(!target||isExcluded(target))return;
+          const baseUnit=target.unit;
+          if(!byLocRaw[target.id])byLocRaw[target.id]={};
+          byLocRaw[target.id]["pooja"]=(byLocRaw[target.id]["pooja"]||0)+cvtUnit(qty,pi.unit,baseUnit);
+          byIdMeta[target.id]=target;
           usedLocIds.add("pooja");
         });
       });
@@ -3945,11 +3978,9 @@ function RepShop({ctx}){
       ...locations.filter(l=>usedLocIds.has(l.id)),
       ...(usedLocIds.has("pooja")?[{id:"pooja",name:t("Pooja Material","பூஜை பொருள்"),nameTamil:t("Pooja Material","பூஜை பொருள்")}]:[]),
     ];
-    const allIngIds=Object.keys(byLocRaw).map(Number);
-    const allIngs=allIngIds
-      .map(id=>ingredients.find(x=>x.id===id)).filter(Boolean)
+    const allIngs=Object.values(byIdMeta)
       .filter(ing=>!isExcluded(ing))
-      .sort((a,b)=>CATS.indexOf(a.category)-CATS.indexOf(b.category)||a.name.localeCompare(b.name));
+      .sort((a,b)=>DISPLAY_CATS.indexOf(a.category)-DISPLAY_CATS.indexOf(b.category)||a.name.localeCompare(b.name));
     return {byLoc:byLocRaw,locCols,allIngs};
   };
 
@@ -4087,7 +4118,7 @@ function RepShop({ctx}){
 
   const doLocPrint=()=>{
     const colHeaders=locCols.map(l=>"<th style='text-align:right'>"+n(l)+"</th>").join("");
-    const catBlocks=CATS.map(cat=>{
+    const catBlocks=DISPLAY_CATS.map(cat=>{
       const ings=locAllIngs.filter(x=>x.category===cat);
       if(!ings.length)return "";
       const rows=ings.map(ing=>{
@@ -4192,7 +4223,7 @@ function RepShop({ctx}){
             <button style={css.btn("ghost",true)} onClick={()=>exportSession(activeTab)}>📥 {t("Excel","எக்செல்")}</button>
             <button style={css.btn("primary",true)} onClick={()=>{
               const dateCols=sortedDates.map(d=>"<th style='text-align:right'>"+d.slice(5)+"</th>").join("");
-              const catBlocks=CATS.map(cat=>{
+              const catBlocks=DISPLAY_CATS.map(cat=>{
                 const ings=allIngs.filter(x=>x.category===cat);
                 if(!ings.length)return "";
                 const rows=ings.map(ing=>{
@@ -4220,7 +4251,7 @@ function RepShop({ctx}){
           </div>
 
           {/* Category cards */}
-          {CATS.map(cat=>{
+          {DISPLAY_CATS.map(cat=>{
             const ings=allIngs.filter(x=>x.category===cat);
             if(!ings.length)return null;
             return(
@@ -4285,7 +4316,7 @@ function RepShop({ctx}){
             <button style={css.btn("ghost",true)} onClick={doLocExport}>📥 {t("Excel","எக்செல்")}</button>
             <button style={css.btn("primary",true)} onClick={doLocPrint}>🖨 {t("Print","அச்சு")}</button>
           </div>
-          {CATS.map(cat=>{
+          {DISPLAY_CATS.map(cat=>{
             const ings=locAllIngs.filter(x=>x.category===cat);
             if(!ings.length)return null;
             return(
@@ -5489,6 +5520,7 @@ function PoojaItemsPage({ctx}){
             <th style={css.th}>{t("Item","பொருள்")}</th>
             <th style={css.th}>{t("Tamil","தமிழ்")}</th>
             <th style={css.th}>{t("Unit","அலகு")}</th>
+            <th style={css.th}>{t("Merge w/ Kitchen","சமையலறையுடன் இணை")}</th>
             <th style={css.th}></th>
           </tr></thead>
           <tbody>
@@ -5499,6 +5531,13 @@ function PoojaItemsPage({ctx}){
                 <td style={css.td}>{editId===item.id?<input style={{...css.inp,fontFamily:"Noto Sans Tamil"}} value={ef.nameTamil||""} onChange={e=>setEf({...ef,nameTamil:e.target.value})}/>:<span style={{fontFamily:"Noto Sans Tamil"}}>{item.nameTamil||"—"}</span>}</td>
                 <td style={css.td}>{editId===item.id?<select style={css.sel} value={ef.unit||item.unit} onChange={e=>setEf({...ef,unit:e.target.value})}>{UNITS.map(u=><option key={u}>{u}</option>)}</select>:<span style={css.badge(P.muted)}>{item.unit}</span>}</td>
                 <td style={css.td}>
+                  <label style={{display:"flex",alignItems:"center",gap:5,fontSize:11,cursor:"pointer",color:item.mergeWithIngredient?P.success:P.muted}}>
+                    <input type="checkbox" checked={!!item.mergeWithIngredient}
+                      onChange={e=>setPoojaItems(p=>p.map(x=>x.id===item.id?{...x,mergeWithIngredient:e.target.checked}:x))}/>
+                    {item.mergeWithIngredient?t("Merges into kitchen total","இணைக்கிறது"):t("Kept separate","தனியாக")}
+                  </label>
+                </td>
+                <td style={css.td}>
                   <div style={{display:"flex",gap:4}}>
                     {editId===item.id
                       ?<><button style={css.btn("success",true)} onClick={saveEdit}>✓</button><button style={css.btn("ghost",true)} onClick={()=>setEditId(null)}>✕</button></>
@@ -5507,7 +5546,7 @@ function PoojaItemsPage({ctx}){
                 </td>
               </tr>
             ))}
-            {!poojaItems.length&&<tr><td colSpan={5} style={{...css.td,textAlign:"center",color:P.muted,padding:20}}>{t("No items yet.","பொருட்கள் இல்லை.")}</td></tr>}
+            {!poojaItems.length&&<tr><td colSpan={6} style={{...css.td,textAlign:"center",color:P.muted,padding:20}}>{t("No items yet.","பொருட்கள் இல்லை.")}</td></tr>}
           </tbody>
         </table>
       </div>
