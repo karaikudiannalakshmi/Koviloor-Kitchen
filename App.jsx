@@ -2105,7 +2105,7 @@ function OrdersPage({ctx}){
   const [dupRepSourceDate,setDupRepSourceDate]=useState(TODAY);
   const [dupRepSourceLoc,setDupRepSourceLoc]=useState("");
   const [dupRepStart,setDupRepStart]=useState(TODAY);
-  const [dupRepDays,setDupRepDays]=useState(30);
+  const [dupRepEnd,setDupRepEnd]=useState(TODAY);
   const [dupRepSess,setDupRepSess]=useState("All");
   const importFileRef=useRef();
   const [importMsg,setImportMsg]=useState("");
@@ -2506,12 +2506,21 @@ function OrdersPage({ctx}){
     .flatMap(o=>o.entries||[])
     .filter(e=>e.locId===locId&&(dupRepSess==="All"||e.session===dupRepSess)).length;
 
+  const dupRepDayCount=(()=>{
+    if(!dupRepStart||!dupRepEnd)return 0;
+    const s=new Date(dupRepStart),e=new Date(dupRepEnd);
+    if(s>e)return 0;
+    return Math.min(366,Math.round((e-s)/86400000)+1);
+  })();
+
   const duplicateRepeatDaily=()=>{
     if(!dupRepSourceDate||!dupRepSourceLoc){alert(t("Select a source date and location.","மூல தேதி மற்றும் இடத்தை தேர்வு செய்யவும்."));return;}
+    if(!dupRepStart||!dupRepEnd){alert(t("Select a start and end date to repeat through.","தொடங்கு மற்றும் முடிவு தேதியை தேர்வு செய்யவும்."));return;}
+    if(new Date(dupRepStart)>new Date(dupRepEnd)){alert(t("Start date must be before end date.","தொடக்க தேதி முடிவு தேதிக்கு முன் இருக்க வேண்டும்."));return;}
     const srcLocId=+dupRepSourceLoc;
     const sourceOrders=orders.filter(o=>!o.isTemplate&&o.date===dupRepSourceDate&&(o.entries||[]).some(e=>e.locId===srcLocId&&(dupRepSess==="All"||e.session===dupRepSess)));
     if(!sourceOrders.length){alert(t("No orders found for that date, location, and session.","அந்த தேதி / இடம் / அமர்வுக்கு ஆர்டர் இல்லை."));return;}
-    const days=Math.max(1,Math.min(366,+dupRepDays||1));
+    const days=Math.max(1,dupRepDayCount||1);
     const newOrders=[]; let idc=Date.now();
     for(let i=0;i<days;i++){
       const d=new Date(dupRepStart); d.setDate(d.getDate()+i);
@@ -2851,12 +2860,15 @@ function OrdersPage({ctx}){
               </div>
               <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
                 <div>
-                  <label style={css.lbl}>{t("Repeat starting from","இதிலிருந்து தொடங்கு")}</label>
+                  <label style={css.lbl}>{t("Repeat from","இதிலிருந்து தொடங்கு")}</label>
                   <input type="date" style={{...css.inp,width:150}} value={dupRepStart} onChange={e=>setDupRepStart(e.target.value)}/>
                 </div>
                 <div>
-                  <label style={css.lbl}>{t("Number of Days","நாட்களின் எண்ணிக்கை")}</label>
-                  <input type="number" min="1" max="366" style={{...css.inp,width:100}} value={dupRepDays} onChange={e=>setDupRepDays(e.target.value)}/>
+                  <label style={css.lbl}>{t("Repeat through","இதுவரை மீண்டும்")}</label>
+                  <input type="date" style={{...css.inp,width:150}} value={dupRepEnd} onChange={e=>setDupRepEnd(e.target.value)}/>
+                </div>
+                <div style={{fontSize:11,color:P.muted,paddingBottom:8}}>
+                  {dupRepDayCount} {t("day(s)","நாட்கள்")}
                 </div>
                 <button style={css.btn("success")} onClick={duplicateRepeatDaily}>✓ {t("Repeat Daily","தினமும் மீண்டும்")}</button>
                 <button style={css.btn("ghost")} onClick={()=>setDupOpen(false)}>{t("Cancel","ரத்து")}</button>
@@ -4509,7 +4521,7 @@ function RepDel({ctx}){
 // REPORT: WEEKLY MENU (columnar recipe list across a date range)
 // ════════════════════════════════════════════════════════════════════
 function RepMenu({ctx}){
-  const {orders,recipes,lang:gLang}=ctx;
+  const {orders,recipes,locations,lang:gLang}=ctx;
   const [rLang,setRLang]=useState(gLang);
   const t=(en,ta)=>rLang==="en"?en:ta;
   const n=(x)=>rLang==="en"?x.name:((x.nameTamil&&x.nameTamil.trim())?x.nameTamil:x.name);
@@ -4518,6 +4530,12 @@ function RepMenu({ctx}){
     const d=new Date(TODAY); d.setDate(d.getDate()+6); return d.toISOString().slice(0,10);
   });
   const [sessF,setSessF]=useState("All");
+  // Empty = all locations combined (previous behavior). Selecting one or more locations
+  // scopes the whole report to just those — added because "all locations mixed together
+  // with no way to tell them apart" was mistaken for a duplicate-day bug: a dish that
+  // belonged to a different location looked like it had been wrongly copied into this one.
+  const [locFilter,setLocFilter]=useState([]);
+  const toggleLocFilter=id=>setLocFilter(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
 
   const sortedDates=useMemo(()=>{
     const dates=[]; const start=new Date(fromDate); const end=new Date(toDate);
@@ -4532,7 +4550,7 @@ function RepMenu({ctx}){
     const map={};
     sortedDates.forEach(dt=>{
       const ents=orders.filter(o=>!o.isTemplate&&o.date===dt)
-        .flatMap(o=>o.entries.filter(e=>sessF==="All"||e.session===sessF));
+        .flatMap(o=>o.entries.filter(e=>(sessF==="All"||e.session===sessF)&&(!locFilter.length||locFilter.includes(e.locId))));
       ents.forEach(e=>{
         const rec=recipes.find(r=>r.id===e.recId); if(!rec)return;
         const key=e.session+"__"+e.recId;
@@ -4545,7 +4563,7 @@ function RepMenu({ctx}){
       if(so!==0)return so;
       return (rLang==="en"?a.rec.name:a.rec.nameTamil||a.rec.name).localeCompare(rLang==="en"?b.rec.name:b.rec.nameTamil||b.rec.name);
     });
-  },[sortedDates,orders,recipes,sessF,rLang]);
+  },[sortedDates,orders,recipes,sessF,rLang,locFilter]);
 
   const hasData=rows.length>0;
 
@@ -4560,8 +4578,9 @@ function RepMenu({ctx}){
     }).join("");
     const thead="<thead><tr>"+(sessF==="All"?"<th>"+t("Session","அமர்வு")+"</th>":"")+"<th>"+t("Dish","உணவு")+"</th>"+dateHeaders+"</tr></thead>";
     const sessLabel=sessF==="All"?t("All Sessions","அனைத்து அமர்வு"):sessF;
+    const locLabel=!locFilter.length?t("All Locations (combined)","அனைத்து இடங்கள் (இணைந்து)"):locations.filter(l=>locFilter.includes(l.id)).map(l=>n(l)).join(", ");
     printHTML(t("Weekly Menu","வார உணவு பட்டியல்")+" ("+fromDate+" – "+toDate+")",
-      "<p style='color:#9B7355;margin:0 0 12px;font-size:12px'>"+t("Session","அமர்வு")+": "+sessLabel+" | "+t("Range","வரம்பு")+": "+fromDate+" – "+toDate+"</p>"
+      "<p style='color:#9B7355;margin:0 0 12px;font-size:12px'>"+t("Session","அமர்வு")+": "+sessLabel+" | "+t("Locations","இடங்கள்")+": "+locLabel+" | "+t("Range","வரம்பு")+": "+fromDate+" – "+toDate+"</p>"
       +"<table>"+thead+"<tbody>"+trows+"</tbody></table>");
   };
 
@@ -4573,7 +4592,8 @@ function RepMenu({ctx}){
       sortedDates.forEach(dt=>{obj[dt]=row.byDate[dt]||"";});
       return obj;
     });
-    exportXlsxSheets("weekly_menu_"+fromDate+"_to_"+toDate+".xlsx",[{name:"Weekly Menu",data}]);
+    const locSuffix=!locFilter.length?"":"_"+locations.filter(l=>locFilter.includes(l.id)).map(l=>l.name.replace(/[^a-zA-Z0-9]+/g,"")).join("-");
+    exportXlsxSheets("weekly_menu_"+fromDate+"_to_"+toDate+locSuffix+".xlsx",[{name:"Weekly Menu",data}]);
   };
 
   return(
@@ -4602,6 +4622,21 @@ function RepMenu({ctx}){
             background:sessF===s?(SCOLOR[s]||P.saffron):"transparent",
           }} onClick={()=>setSessF(s)}>{s==="All"?t("All Sessions","அனைத்து அமர்வு"):s}</button>
         ))}
+      </div>
+
+      <div style={{marginBottom:14}}>
+        <label style={css.lbl}>{t("Locations","இடங்கள்")}</label>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          <button style={css.btn(locFilter.length===0?"primary":"ghost",true)} onClick={()=>setLocFilter([])}>{t("All (combined)","அனைத்தும் (இணைந்து)")}</button>
+          {locations.map(l=>(
+            <label key={l.id} style={{display:"flex",alignItems:"center",gap:4,fontSize:12,cursor:"pointer",
+              background:locFilter.includes(l.id)?P.saffron+"22":"white",
+              border:"1px solid "+(locFilter.includes(l.id)?P.saffron:"#DCC88A"),borderRadius:7,padding:"4px 9px"}}>
+              <input type="checkbox" checked={locFilter.includes(l.id)} onChange={()=>toggleLocFilter(l.id)}/>
+              {n(l)}
+            </label>
+          ))}
+        </div>
       </div>
 
       {!hasData?(
