@@ -2359,24 +2359,56 @@ function OrdersPage({ctx}){
       .length;
   })();
 
+  // ── Weekday-exact range copy ───────────────────────────────────────────────
+  // Every target day takes its menu from the source day with the SAME weekday
+  // (Monday→Monday … Sunday→Sunday), never from a blind date shift. The new range is as
+  // long as the source range and starts on the chosen new start date; for each target day
+  // we pick the source day with the same weekday (for ranges longer than a week, week 1 of
+  // the target uses week 1 of the source, week 2 uses week 2, and so on, cycling if the
+  // target is longer). A target day whose weekday doesn't exist in the source (only possible
+  // when the source is shorter than 7 days) is skipped rather than filled with something else.
+  const isoToUtc=d=>new Date(d+"T00:00:00Z");
+  const utcToIso=d=>d.toISOString().slice(0,10);
+  const addDaysIso=(d,n)=>{const x=isoToUtc(d);x.setUTCDate(x.getUTCDate()+n);return utcToIso(x);};
+  const WD_EN=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  const WD_FULL=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const wdOf=d=>isoToUtc(d).getUTCDay();
+  const dupRangePlan=(()=>{
+    if(!dupRangeFrom||!dupRangeTo||!dupRangeTarget)return{pairs:[],skipped:[],misaligned:false};
+    if(dupRangeFrom>dupRangeTo)return{pairs:[],skipped:[],misaligned:false};
+    const srcDates=[];
+    for(let d=dupRangeFrom;d<=dupRangeTo&&srcDates.length<366;d=addDaysIso(d,1))srcDates.push(d);
+    const byWd={};
+    srcDates.forEach(d=>{const w=wdOf(d);(byWd[w]=byWd[w]||[]).push(d);});
+    const pairs=[],skipped=[];
+    srcDates.forEach((_,i)=>{
+      const tgt=addDaysIso(dupRangeTarget,i);
+      const cands=byWd[wdOf(tgt)];
+      if(!cands){skipped.push(tgt);return;}
+      pairs.push({src:cands[Math.floor(i/7)%cands.length],tgt});
+    });
+    return{pairs,skipped,misaligned:wdOf(dupRangeFrom)!==wdOf(dupRangeTarget)};
+  })();
+
   const shiftDateRange=()=>{
     if(!dupRangeFrom||!dupRangeTo||!dupRangeTarget)return;
-    const s=new Date(dupRangeFrom),e=new Date(dupRangeTo);
-    if(s>e){alert(t("From date must be before To date.","இருந்து தேதி வரை தேதிக்கு முன் இருக்க வேண்டும்."));return;}
-    const offsetMs=new Date(dupRangeTarget)-s;
-    const source=orders.filter(o=>!o.isTemplate&&new Date(o.date)>=s&&new Date(o.date)<=e);
-    if(!source.length){alert(t("No orders found in that date range.","அந்த தேதி வரம்பில் ஆர்டர் இல்லை."));return;}
-    const copies=source.map((o,i)=>{
-      const newDate=new Date(new Date(o.date).getTime()+offsetMs).toISOString().slice(0,10);
-      const newEntries=(o.entries||[])
-        .filter(en=>(dupRangeSess==="All"||en.session===dupRangeSess)&&(!dupRangeLocs.length||dupRangeLocs.includes(en.locId)))
-        .map(en=>({...en}));
-      if(!newEntries.length)return null;
-      return{...o,id:Date.now()+i,date:newDate,name:o.name,entries:newEntries,costSnapshot:costOfEntries(newEntries)};
-    }).filter(Boolean);
+    if(dupRangeFrom>dupRangeTo){alert(t("From date must be before To date.","இருந்து தேதி வரை தேதிக்கு முன் இருக்க வேண்டும்."));return;}
+    if(!dupRangePlan.pairs.length){alert(t("Nothing to copy for this range.","இந்த வரம்பில் நகலெடுக்க எதுவும் இல்லை."));return;}
+    const copies=[]; let idc=Date.now();
+    dupRangePlan.pairs.forEach(({src,tgt})=>{
+      orders.filter(o=>!o.isTemplate&&o.date===src).forEach(o=>{
+        const newEntries=(o.entries||[])
+          .filter(en=>(dupRangeSess==="All"||en.session===dupRangeSess)&&(!dupRangeLocs.length||dupRangeLocs.includes(en.locId)))
+          .map(en=>({...en})); // exact copy: same recipe, qty, baseQty/basePax
+        if(!newEntries.length)return;
+        // ...o carries the order's own pax along unchanged, so each weekday keeps its own pax
+        copies.push({...o,id:idc++,date:tgt,name:o.name,entries:newEntries,costSnapshot:costOfEntries(newEntries)});
+      });
+    });
     if(!copies.length){alert(t("No entries matched the selected session/locations in that date range.","தேர்ந்த அமர்வு / இடங்களுக்கு பொருந்தும் பதிவுகள் இல்லை."));return;}
-    const lastDate=copies.reduce((mx,c)=>c.date>mx?c.date:mx,copies[0].date);
-    const action2=confirmDuplicate(copies,copies.length+" "+t("order(s) will be created, starting","ஆர்டர்(கள்) உருவாக்கப்படும், தொடங்கும்")+" "+dupRangeTarget+" ("+t("through","வரை")+" "+lastDate+").");
+    const mapText=dupRangePlan.pairs.slice(0,7).map(p=>WD_EN[wdOf(p.src)]+" "+p.src+" → "+WD_EN[wdOf(p.tgt)]+" "+p.tgt).join("\n");
+    const lastDate=dupRangePlan.pairs[dupRangePlan.pairs.length-1].tgt;
+    const action2=confirmDuplicate(copies,copies.length+" "+t("order(s) will be created, starting","ஆர்டர்(கள்) உருவாக்கப்படும், தொடங்கும்")+" "+dupRangeTarget+" ("+t("through","வரை")+" "+lastDate+").\n\n"+t("Weekday matching:","கிழமை பொருத்தம்:")+"\n"+mapText+(dupRangePlan.pairs.length>7?"\n…":""));
     if(!action2)return;
     applyDuplicateResult(copies,action2);
     setDupOpen(false);
@@ -2614,7 +2646,7 @@ function OrdersPage({ctx}){
           ):dupMode==="range"?(
             <div>
               <div style={{fontSize:11,color:P.muted,marginBottom:8}}>
-                {t("Copies every order in the source range to a new range, keeping the same day-to-day pattern (locations, sessions, dishes, quantities). E.g. repeat your last 2 weeks' plan as the next 2 weeks.","மூல வரம்பின் ஒவ்வொரு ஆர்டரையும் புதிய வரம்புக்கு நகலெடுக்கும்.")}
+                {t("Copies every order in the source range to a new range of the same length, matched by WEEKDAY — Monday gets the source Monday, Tuesday the source Tuesday, and so on — with the same locations, sessions, dishes, quantities and pax. Tip: start the source on a Monday and the new range on a Monday for a clean Monday–Sunday copy.","மூல வரம்பின் ஒவ்வொரு ஆர்டரையும் அதே கிழமையுடன் புதிய வரம்புக்கு நகலெடுக்கும்.")}
               </div>
               <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
                 <div>
@@ -2633,6 +2665,21 @@ function OrdersPage({ctx}){
                   {dupRangeDayCount} {t("day(s) in source","நாட்கள்")}, {dupRangeMatchCount} {t("order(s) found","ஆர்டர்கள் கிடைத்தன")}
                 </div>
               </div>
+              {dupRangePlan.pairs.length>0&&(
+                <div style={{marginTop:8,fontSize:11,color:dupRangePlan.misaligned?P.danger:P.muted,background:"white",border:"1px solid "+(dupRangePlan.misaligned?P.danger:"#DCC88A"),borderRadius:7,padding:"6px 10px"}}>
+                  <strong>{t("Weekday matching","கிழமை பொருத்தம்")}:</strong>{" "}
+                  {dupRangePlan.pairs.slice(0,7).map(p=>WD_EN[wdOf(p.src)]+" "+p.src.slice(5)+" → "+WD_EN[wdOf(p.tgt)]+" "+p.tgt.slice(5)).join("  |  ")}
+                  {dupRangePlan.pairs.length>7&&" …"}
+                  {dupRangePlan.misaligned&&(
+                    <div style={{marginTop:4,fontWeight:600}}>
+                      ⚠️ {t("Source starts on "+WD_FULL[wdOf(dupRangeFrom)]+" but the new start is a "+WD_FULL[wdOf(dupRangeTarget)]+". Days are still matched by weekday (each "+WD_FULL[wdOf(dupRangeTarget)]+" gets the source "+WD_FULL[wdOf(dupRangeTarget)]+"), so the copied week is re-ordered. Pick a new start date that falls on a "+WD_FULL[wdOf(dupRangeFrom)]+" if you want the same order.","மூலம் தொடங்கும் கிழமையும் புதிய தொடக்க கிழமையும் வேறு. ஒவ்வொரு கிழமையும் அதே கிழமையிலிருந்து நகலெடுக்கப்படும்.")}
+                    </div>
+                  )}
+                  {dupRangePlan.skipped.length>0&&(
+                    <div style={{marginTop:4}}>{t("No source day for the same weekday, so skipped:","அதே கிழமை மூலத்தில் இல்லை, தவிர்க்கப்பட்டது:")} {dupRangePlan.skipped.join(", ")}</div>
+                  )}
+                </div>
+              )}
               <div style={{marginTop:10,marginBottom:10}}>
                 <label style={css.lbl}>{t("Session","அமர்வு")}</label>
                 <div style={{display:"flex",gap:4}}>
@@ -4530,6 +4577,9 @@ function RepMenu({ctx}){
     const d=new Date(TODAY); d.setDate(d.getDate()+6); return d.toISOString().slice(0,10);
   });
   const [sessF,setSessF]=useState("All");
+  // Weekday label shown with every date column (Mon/Tue… or Tamil short names)
+  const WD={en:["Sun","Mon","Tue","Wed","Thu","Fri","Sat"],ta:["ஞா","திங்","செ","புத","வியா","வெ","சனி"]};
+  const dayOf=d=>WD[rLang==="en"?"en":"ta"][new Date(d+"T00:00:00Z").getUTCDay()];
   // Empty = all locations combined (previous behavior). Selecting one or more locations
   // scopes the whole report to just those — added because "all locations mixed together
   // with no way to tell them apart" was mistaken for a duplicate-day bug: a dish that
@@ -4568,7 +4618,7 @@ function RepMenu({ctx}){
   const hasData=rows.length>0;
 
   const doPrint=()=>{
-    const dateHeaders=sortedDates.map(d=>"<th style='text-align:center'>"+d.slice(5)+"</th>").join("");
+    const dateHeaders=sortedDates.map(d=>"<th style='text-align:center'>"+dayOf(d)+"<br>"+d.slice(5)+"</th>").join("");
     const trows=rows.map(row=>{
       const cells=sortedDates.map(dt=>{
         const v=row.byDate[dt];
@@ -4589,7 +4639,7 @@ function RepMenu({ctx}){
       const obj={};
       if(sessF==="All")obj[t("Session","அமர்வு")]=row.session;
       obj[t("Dish","உணவு")]=n(row.rec);
-      sortedDates.forEach(dt=>{obj[dt]=row.byDate[dt]||"";});
+      sortedDates.forEach(dt=>{obj[dt+" ("+dayOf(dt)+")"]=row.byDate[dt]||"";});
       return obj;
     });
     const locSuffix=!locFilter.length?"":"_"+locations.filter(l=>locFilter.includes(l.id)).map(l=>l.name.replace(/[^a-zA-Z0-9]+/g,"")).join("-");
@@ -4647,7 +4697,7 @@ function RepMenu({ctx}){
             <thead><tr>
               {sessF==="All"&&<th style={css.th}>{t("Session","அமர்வு")}</th>}
               <th style={css.th}>{t("Dish","உணவு")}</th>
-              {sortedDates.map(dt=><th key={dt} style={{...css.th,textAlign:"center",minWidth:80}}>{dt.slice(5)}</th>)}
+              {sortedDates.map(dt=><th key={dt} style={{...css.th,textAlign:"center",minWidth:80}}><div style={{fontSize:11,opacity:0.85}}>{dayOf(dt)}</div>{dt.slice(5)}</th>)}
             </tr></thead>
             <tbody>
               {rows.map((row,i)=>(
