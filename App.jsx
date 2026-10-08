@@ -3942,7 +3942,10 @@ function RepShop({ctx}){
   };
   const buildData=(sessFilter)=>{
     const byDate={};
-    const poojaByDate=includePooja?computePoojaDemandByDate(poojaTemples,poojaItems,occOrders,sortedDates):{};
+    // Pooja Material isn't a kitchen session, so it only joins the combined "All" list —
+    // it stays out of the Breakfast / Lunch / Snack / Dinner tabs.
+    const poojaOn=includePooja&&sessFilter==="All";
+    const poojaByDate=poojaOn?computePoojaDemandByDate(poojaTemples,poojaItems,occOrders,sortedDates):{};
     sortedDates.forEach(dt=>{
       byDate[dt]={};
       const ents=orders.filter(o=>!o.isTemplate&&o.date===dt)
@@ -3959,7 +3962,7 @@ function RepShop({ctx}){
       // matching kitchen ingredient by name — everything else stays as its own separate
       // line item even when a same-named kitchen ingredient exists (e.g. Pooja Coconut
       // is a physically different purchase from Kitchen Coconut, so it must not merge).
-      if(includePooja){
+      if(poojaOn){
         Object.entries(poojaByDate[dt]||{}).forEach(([itemIdStr,qty])=>{
           const pi=poojaItems.find(x=>x.id===+itemIdStr);
           if(!pi)return;
@@ -4017,7 +4020,7 @@ function RepShop({ctx}){
     // Fold in Pooja Material as its own virtual "location" column. Only Milk and Curd
     // merge into the matching kitchen ingredient by name — everything else stays as its
     // own separate line item even when a same-named kitchen ingredient exists.
-    if(includePooja){
+    if(includePooja&&sessFilter==="All"){
       const poojaByDate=computePoojaDemandByDate(poojaTemples,poojaItems,occOrders,sortedDates);
       sortedDates.forEach(dt=>{
         Object.entries(poojaByDate[dt]||{}).forEach(([itemIdStr,qty])=>{
@@ -4056,7 +4059,7 @@ function RepShop({ctx}){
     // Track row number for formulas (1-indexed, header=1, col headers=2, data from 3)
     const rows=[];
     const catOrder=["grocery","spice","other","vegetable","cut"];
-    const catLabel={grocery:"Grocery",spice:"Spice",other:"Other",vegetable:"Vegetable",cut:"Cut Veg"};
+    const catLabel={grocery:"Grocery",spice:"Spice",other:"Other",vegetable:"Vegetable",cut:"Cut Veg",pooja:"Pooja Material"};
 
     // Collect columns: Name | Unit | date1 | date2... | Total | Available | To Order
     const dateCols=sortedDates;
@@ -4069,7 +4072,7 @@ function RepShop({ctx}){
 
     let rowNum=3; // start after banner row (1) and header row (2)
 
-    CATS.forEach(cat=>{
+    DISPLAY_CATS.forEach(cat=>{
       const ings=allIngs.filter(x=>x.category===cat);
       if(!ings.length)return;
 
@@ -4119,7 +4122,7 @@ function RepShop({ctx}){
     const rows=[];
     rows.push({Category:t("Locations","இடங்கள்")+": "+selectedLocLabel,[t("Ingredient","பொருள்")]:"",Unit:""});
     // Column layout: Category | Ingredient | date cols... | Total | Unit | In Stock | To Buy
-    CATS.forEach((cat,ci)=>{
+    DISPLAY_CATS.forEach((cat,ci)=>{
       const ings=allIngs.filter(x=>x.category===cat);
       if(!ings.length)return;
       // Category heading row — name in Category col, ingredient col blank
@@ -4140,7 +4143,7 @@ function RepShop({ctx}){
         rows.push(row);
       });
       // Blank separator between categories
-      if(ci<CATS.length-1)rows.push({Category:"",[t("Ingredient","பொருள்")]:"",Unit:"",Total:"","In Stock":"","To Buy":""});
+      if(ci<DISPLAY_CATS.length-1)rows.push({Category:"",[t("Ingredient","பொருள்")]:"",Unit:"",Total:"","In Stock":"","To Buy":""});
     });
     const label=sessFilter==="All"?"All_Sessions":sessFilter;
     exportXlsxSheets("shopping_"+label+"_"+sortedDates[0]+".xlsx",[{name:label.slice(0,31),data:rows}]);
@@ -4156,7 +4159,7 @@ function RepShop({ctx}){
   const doLocExport=()=>{
     const rows=[];
     rows.push({Category:t("Locations","இடங்கள்")+": "+selectedLocLabel+"   |   "+t("Dates","தேதிகள்")+": "+sortedDates[0]+(sortedDates.length>1?" – "+sortedDates[sortedDates.length-1]:""),[t("Ingredient","பொருள்")]:"",Unit:""});
-    CATS.forEach((cat,ci)=>{
+    DISPLAY_CATS.forEach((cat,ci)=>{
       const ings=locAllIngs.filter(x=>x.category===cat);
       if(!ings.length)return;
       const headRow={Category:"▶ "+CATLABEL[cat].toUpperCase(),[t("Ingredient","பொருள்")]:"",Unit:""};
@@ -4170,7 +4173,7 @@ function RepShop({ctx}){
         row["Total"]=round2(total);
         rows.push(row);
       });
-      if(ci<CATS.length-1)rows.push({Category:"",[t("Ingredient","பொருள்")]:"",Unit:""});
+      if(ci<DISPLAY_CATS.length-1)rows.push({Category:"",[t("Ingredient","பொருள்")]:"",Unit:""});
     });
     exportXlsxSheets("shopping_by_location_"+sortedDates[0]+(sortedDates.length>1?"_to_"+sortedDates[sortedDates.length-1]:"")+".xlsx",[{name:"By Location",data:rows}]);
   };
