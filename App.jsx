@@ -3009,12 +3009,13 @@ function OrdersPage({ctx}){
             <th style={css.th}>{t("Order Name","பெயர்")}</th>
             <th style={css.th}>{t("Locations","இடங்கள்")}</th>
             <th style={css.th}>{t("Sessions","அமர்வுகள்")}</th>
+            <th style={{...css.th,textAlign:"center"}}>{t("Pax","நபர்கள்")}</th>
             <th style={css.th}>{t("Items","பதிவுகள்")}</th>
             <th style={css.th}>{t("Est. Cost","மதிப்பீடு")}</th>
             <th style={css.th}></th>
           </tr></thead>
           <tbody>
-            {filtReal.length===0&&<tr><td colSpan={6} style={{...css.td,textAlign:"center",color:P.muted,padding:20}}>{t("No orders found.","ஆர்டர்கள் இல்லை.")}</td></tr>}
+            {filtReal.length===0&&<tr><td colSpan={8} style={{...css.td,textAlign:"center",color:P.muted,padding:20}}>{t("No orders found.","ஆர்டர்கள் இல்லை.")}</td></tr>}
             {pagedReal.map((ord,i)=>{
               const locs=[...new Set(ord.entries.map(e=>e.locId))];
               const sess=[...new Set(ord.entries.map(e=>e.session))];
@@ -3030,6 +3031,12 @@ function OrdersPage({ctx}){
                   </td>
                   <td style={{...css.td,fontSize:11}}>{locNames.join(", ")||"—"}</td>
                   <td style={css.td}><div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{sess.map(s=><span key={s} style={css.badge(SCOLOR[s]||P.muted)}>{s}</span>)}</div></td>
+                  <td style={{...css.td,textAlign:"center",fontWeight:700,color:P.deepBrown}}>{(()=>{
+                    // Order-level pax if set; otherwise the distinct pax the entries were sized for
+                    if(+ord.pax>0)return +ord.pax;
+                    const ps=[...new Set(ord.entries.map(e=>+e.basePax).filter(v=>v>0))];
+                    return ps.length?ps.join(" / "):<span style={{color:"#CCC",fontWeight:400}}>—</span>;
+                  })()}</td>
                   <td style={{...css.td,textAlign:"center"}}>{ord.entries.length}</td>
                   <td style={css.td}>{(()=>{
                     const totalCost=ord.costSnapshot!==undefined?ord.costSnapshot:ord.entries.reduce((sum,e)=>{
