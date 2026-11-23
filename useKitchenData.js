@@ -71,6 +71,9 @@ export function useKitchenData() {
   useEffect(() => {
     const ref = doc(db, COL, KITCHEN_DOC);
     return onSnapshot(ref, snap => {
+      // Empty answer from the local cache (offline / flaky connection) is NOT proof the document
+      // is missing. Never seed defaults from it - wait for the server's real answer.
+      if (!snap.exists() && snap.metadata.fromCache) return;
       const d = snap.exists() ? snap.data() : null;
       const data = d || { inventory:{purchases:[],issues:[]}, locations:LOC0, recipeTypes:RTYPE_SEED };
       if (!d) setDoc(ref, clean(data));
@@ -91,6 +94,9 @@ export function useKitchenData() {
   useEffect(() => {
     const ref = doc(db, COL, ORDERS_DOC);
     return onSnapshot(ref, async snap => {
+      // Empty answer from the local cache (offline / flaky connection) is NOT proof the document
+      // is missing. Never seed defaults from it - wait for the server's real answer.
+      if (!snap.exists() && snap.metadata.fromCache) return;
       if (snap.exists()) {
         const data = snap.data();
         if (!ordSaving.current) {
@@ -106,9 +112,7 @@ export function useKitchenData() {
           await setDoc(ref, clean({ orders: migrated }));
           // onSnapshot fires again after setDoc, setting state then
         } catch(e) {
-          console.error("Orders migration failed:", e);
-          await setDoc(ref, { orders: [] });
-          ordOK.current = true; checkLoaded();
+          console.error("Orders migration failed (nothing written):", e);
         }
       }
     }, err => { console.error("Orders:", err); ordOK.current=true; checkLoaded(); });
@@ -118,6 +122,9 @@ export function useKitchenData() {
   useEffect(() => {
     const ref = doc(db, COL, CATALOG_DOC);
     return onSnapshot(ref, snap => {
+      // Empty answer from the local cache (offline / flaky connection) is NOT proof the document
+      // is missing. Never seed defaults from it - wait for the server's real answer.
+      if (!snap.exists() && snap.metadata.fromCache) return;
       const d = snap.exists() ? snap.data() : null;
       const data = d || { recipes:REC0, ingredients:ING0 };
       if (!d) setDoc(ref, clean(data));
@@ -135,6 +142,9 @@ export function useKitchenData() {
   useEffect(() => {
     const ref = doc(db, COL, POOJA_DOC);
     return onSnapshot(ref, snap => {
+      // Empty answer from the local cache (offline / flaky connection) is NOT proof the document
+      // is missing. Never seed defaults from it - wait for the server's real answer.
+      if (!snap.exists() && snap.metadata.fromCache) return;
       const d = snap.exists() ? snap.data() : null;
       const data = d || { poojaItems:[], poojaTemples:[], poojaDels:[] };
       if (!d) setDoc(ref, clean(data));
@@ -154,6 +164,9 @@ export function useKitchenData() {
   useEffect(() => {
     const ref = doc(db, COL, OCCASIONS_DOC);
     return onSnapshot(ref, snap => {
+      // Empty answer from the local cache (offline / flaky connection) is NOT proof the document
+      // is missing. Never seed defaults from it - wait for the server's real answer.
+      if (!snap.exists() && snap.metadata.fromCache) return;
       const d = snap.exists() ? snap.data() : null;
       const data = d || { occTemplates:[], occOrders:[] };
       if (!d) setDoc(ref, clean(data));

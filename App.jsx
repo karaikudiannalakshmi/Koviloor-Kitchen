@@ -684,6 +684,43 @@ function App(){
     poojaItems,setPoojaItems,poojaTemples,setPoojaTemples,poojaDels,setPoojaDels,
     occTemplates,setOccTemplates,occOrders,setOccOrders} = useKitchenData();
 
+  // ── Backup / Restore (JSON file of ALL data) ──
+  const backupInputRef=useRef(null);
+  const downloadBackup=()=>{
+    const data={kind:"koviloor-restore",version:2,savedAt:new Date().toISOString(),
+      locations,ingredients,recipes,recipeTypes,orders,inventory,
+      poojaItems,poojaTemples,poojaDels,occTemplates,occOrders};
+    const blob=new Blob([JSON.stringify(data)],{type:"application/json"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download="koviloor_backup_"+new Date().toISOString().slice(0,10)+".json";
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  };
+  const restoreBackup=e=>{
+    const file=e.target.files&&e.target.files[0]; e.target.value="";
+    if(!file)return;
+    if(!loaded){alert("Please wait until the app has finished loading, then try again.");return;}
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      let d;
+      try{d=JSON.parse(ev.target.result);}catch(err){alert("This file is not a valid backup file.");return;}
+      if(!d||d.kind!=="koviloor-restore"){alert("This is not a Koviloor backup/restore file.");return;}
+      const parts=[["locations","Locations",setLocations],["ingredients","Ingredients",setIngredients],
+        ["recipes","Recipes",setRecipes],["recipeTypes","Recipe types",setRecipeTypes],["orders","Orders",setOrders],
+        ["inventory","Inventory",setInventory],["poojaItems","Pooja items",setPoojaItems],
+        ["poojaTemples","Pooja temples",setPoojaTemples],["poojaDels","Pooja deliveries",setPoojaDels],
+        ["occTemplates","Occasion templates",setOccTemplates],["occOrders","Occasion orders",setOccOrders]
+      ].filter(([k])=>d[k]!==undefined&&d[k]!==null);
+      if(!parts.length){alert("The file has no data to restore.");return;}
+      const summary=parts.map(([k,label])=>label+": "+(Array.isArray(d[k])?d[k].length:"1 item")).join("\n");
+      if(!window.confirm("RESTORE will REPLACE the current data in these sections with the file's data:\n\n"+summary+"\n\nContinue?"))return;
+      parts.forEach(([k,label,setter])=>setter(d[k]));
+      alert("Restored. The app will save it to the cloud in a few seconds - wait for the Saved tick before closing.");
+    };
+    reader.readAsText(file);
+  };
+
   const [quickDate,setQuickDate]=useState(TODAY);
   const ctx={lang,ingredients,setIngredients,recipes,setRecipes,locations,setLocations,orders,setOrders,inventory,setInventory,recipeTypes,setRecipeTypes,setModal,poojaItems,setPoojaItems,poojaTemples,setPoojaTemples,poojaDels,setPoojaDels,occTemplates,setOccTemplates,occOrders,setOccOrders,setPage,quickDate,setQuickDate};
   const t=(en,ta)=>lang==="en"?en:ta;
@@ -758,7 +795,10 @@ function App(){
               <option value="ta">தமிழ்</option>
             </select>
           </div>
-          <button data-tour="save-btn" disabled={saveStatus==="saving"||saveStatus==="idle"||saveStatus==="saved"} onClick={forceSave} style={{marginLeft:12,padding:"6px 18px",borderRadius:7,border:"none",cursor:saveStatus==="pending"?"pointer":"default",fontWeight:700,fontSize:12,background:saveStatus==="error"?"#C0392B":saveStatus==="saved"?"#1A7A40":saveStatus==="pending"?"#E8821A":"#DCC88A",color:"white",opacity:saveStatus==="idle"||saveStatus==="saved"?0.6:1,transition:"all 0.2s"}}>{saveStatus==="saving"?"⏳ Saving...":saveStatus==="saved"?"✓ Saved":saveStatus==="error"?"⚠ Retry Save":"💾 Save"}</button>
+          <button onClick={downloadBackup} title="Download a backup file of all data" style={{marginLeft:12,padding:"6px 12px",borderRadius:7,border:"1px solid #DCC88A",background:"transparent",color:"#7A5C2E",fontSize:12,cursor:"pointer",fontWeight:600}}>⬇ Backup</button>
+          <button onClick={()=>backupInputRef.current&&backupInputRef.current.click()} title="Restore data from a backup file" style={{marginLeft:6,padding:"6px 12px",borderRadius:7,border:"1px solid #DCC88A",background:"transparent",color:"#7A5C2E",fontSize:12,cursor:"pointer",fontWeight:600}}>⬆ Restore</button>
+          <input ref={backupInputRef} type="file" accept=".json,application/json" style={{display:"none"}} onChange={restoreBackup}/>
+          <button data-tour="save-btn" disabled={saveStatus==="saving"||saveStatus==="idle"||saveStatus==="saved"} onClick={forceSave} style={{marginLeft:8,padding:"6px 18px",borderRadius:7,border:"none",cursor:saveStatus==="pending"?"pointer":"default",fontWeight:700,fontSize:12,background:saveStatus==="error"?"#C0392B":saveStatus==="saved"?"#1A7A40":saveStatus==="pending"?"#E8821A":"#DCC88A",color:"white",opacity:saveStatus==="idle"||saveStatus==="saved"?0.6:1,transition:"all 0.2s"}}>{saveStatus==="saving"?"⏳ Saving...":saveStatus==="saved"?"✓ Saved":saveStatus==="error"?"⚠ Retry Save":"💾 Save"}</button>
           <button onClick={()=>{sessionStorage.removeItem("kk_auth");window.location.reload();}} style={{marginLeft:8,padding:"6px 12px",borderRadius:7,border:"1px solid #DCC88A",background:"transparent",color:"#9B7355",fontSize:12,cursor:"pointer",fontWeight:600}}>🔒 Lock</button>
         </div>
         <div style={css.content}>
