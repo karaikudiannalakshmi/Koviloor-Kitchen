@@ -1231,6 +1231,7 @@ function IngSubstituteModal({ctx,onClose}){
   const [srcId,setSrcId]=useState("");
   const [tgtId,setTgtId]=useState("");
   const [rate,setRate]=useState("1");
+  const [keep,setKeep]=useState("0"); // fraction of the ORIGINAL quantity that stays on the source ingredient (0 = remove it)
   const [preview,setPreview]=useState(null);
 
   const src=srcId?ingredients.find(x=>x.id===+srcId):null;
@@ -1239,12 +1240,14 @@ function IngSubstituteModal({ctx,onClose}){
   const doPreview=()=>{
     if(!src||!tgt||!rate)return;
     const r=+rate;
+    const k=Math.max(0,+keep||0);
     const affected=recipes.filter(rec=>(rec.ingredients||[]).some(x=>x.iid===src.id));
     const rows=affected.map(rec=>{
       const entry=rec.ingredients.find(x=>x.iid===src.id);
       const existingTgt=rec.ingredients.find(x=>x.iid===tgt.id);
       const newQty=+(entry.qty*r).toFixed(4);
-      return{rec,oldQty:entry.qty,oldUnit:entry.unit,newQty,
+      const keepQty=k>0?+(entry.qty*k).toFixed(4):0;
+      return{rec,oldQty:entry.qty,oldUnit:entry.unit,newQty,keepQty,
         willMerge:!!existingTgt,mergedQty:existingTgt?+(existingTgt.qty+newQty).toFixed(4):newQty};
     });
     setPreview(rows);
@@ -1255,7 +1258,7 @@ function IngSubstituteModal({ctx,onClose}){
     setRecipes(prev=>prev.map(rec=>{
       const row=preview.find(x=>x.rec.id===rec.id);
       if(!row)return rec;
-      let ings=(rec.ingredients||[]).filter(x=>x.iid!==src.id);
+      let ings=(rec.ingredients||[]).map(x=>x.iid!==src.id?x:(row.keepQty>0?{...x,qty:row.keepQty}:null)).filter(Boolean);
       const existingIdx=ings.findIndex(x=>x.iid===tgt.id);
       if(existingIdx>=0)ings[existingIdx]={...ings[existingIdx],qty:row.mergedQty};
       else ings.push({iid:tgt.id,qty:row.newQty,unit:tgt.unit});
@@ -1293,8 +1296,16 @@ function IngSubstituteModal({ctx,onClose}){
         <input type="number" step="0.01" min="0" style={{...css.inp,width:120}} value={rate}
           onChange={e=>{setRate(e.target.value);setPreview(null);}} placeholder="e.g. 0.2"/>
         {src&&tgt&&<div style={{fontSize:11,color:P.muted,marginTop:4}}>
-          1 {src.unit} {n(src)} = {rate||"?"} {tgt.unit} {n(tgt)}
+          1 {src.unit} {n(src)} = {+keep>0?(keep+" "+src.unit+" "+n(src)+" + "):""}{rate||"?"} {tgt.unit} {n(tgt)}
         </div>}
+      </div>
+      <div style={{marginTop:10}}>
+        <label style={css.lbl}>{t("Keep this much of the original ingredient (optional)","அசல் பொருளில் எவ்வளவு வைத்திருக்க (விருப்பம்)")}</label>
+        <input type="number" step="0.01" min="0" style={{...css.inp,width:120}} value={keep}
+          onChange={e=>{setKeep(e.target.value);setPreview(null);}} placeholder="0"/>
+        <div style={{fontSize:11,color:P.muted,marginTop:4}}>
+          {t("0 = remove the original completely. For a split, e.g. Onion → 10% Onion + 10% Onion Flakes: Keep = 0.1 and Conversion Rate = 0.1. Apply a split only ONCE, or the original shrinks again.","0 = அசலை முழுவதும் நீக்கு. பிரித்தால்: வெங்காயம் 10% + ஃபிளேக்ஸ் 10% என்றால் Keep = 0.1, Rate = 0.1. ஒரு முறை மட்டும் செய்யவும்.")}
+        </div>
       </div>
       <div style={{display:"flex",justifyContent:"flex-end",marginTop:12}}>
         <button style={css.btn("info")} onClick={doPreview} disabled={!src||!tgt||!rate}>{t("Preview","முன்னோட்டம்")}</button>
@@ -1317,7 +1328,7 @@ function IngSubstituteModal({ctx,onClose}){
                 <tr key={row.rec.id} style={{background:i%2===0?P.white:P.highlight}}>
                   <td style={css.td}><strong>{n(row.rec)}</strong></td>
                   <td style={css.td}>{row.oldQty} {row.oldUnit} {n(src)}</td>
-                  <td style={css.td}><strong style={{color:P.success}}>{row.willMerge?row.mergedQty:row.newQty} {tgt.unit} {n(tgt)}</strong></td>
+                  <td style={css.td}>{row.keepQty>0&&<span><strong style={{color:P.success}}>{row.keepQty} {row.oldUnit} {n(src)}</strong> + </span>}<strong style={{color:P.success}}>{row.willMerge?row.mergedQty:row.newQty} {tgt.unit} {n(tgt)}</strong></td>
                   <td style={css.td}>{row.willMerge&&<span style={{...css.badge(P.info),fontSize:10}}>{t("merges with existing","ஏற்கனவே உள்ளதுடன் இணையும்")}</span>}</td>
                 </tr>
               ))}</tbody>
